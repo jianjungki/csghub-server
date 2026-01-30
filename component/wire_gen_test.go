@@ -8,7 +8,6 @@ package component
 
 import (
 	"context"
-
 	"github.com/google/wire"
 	"github.com/stretchr/testify/mock"
 	"opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/accounting"

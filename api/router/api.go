@@ -31,6 +31,7 @@ import (
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/i18n"
 	"opencsg.com/csghub-server/common/types"
+	"opencsg.com/csghub-server/component"
 )
 
 func RunServer(config *config.Config, enableSwagger bool) {
@@ -506,6 +507,14 @@ func NewRouter(config *config.Config, enableSwagger bool) (*gin.Engine, error) {
 	}
 	createPromptRoutes(apiGroup, middlewareCollection, promptHandler, repoCommonHandler)
 
+	// memory service
+	memoryComp, err := component.NewMemoryComponent(config)
+	if err != nil {
+		return nil, fmt.Errorf("error creating memory component,%w", err)
+	}
+	memoryHandler := handler.NewMemoryHandler(memoryComp)
+	createMemoryRoutes(apiGroup, middlewareCollection, memoryHandler)
+
 	// dataflow proxy
 	dataflowHandler, err := handler.NewDataflowProxyHandler(config)
 	if err != nil {
@@ -676,7 +685,7 @@ func createModelRoutes(config *config.Config,
 		modelsDeployGroup.DELETE("/:namespace/:name/run/:id", modelHandler.DeployDelete)
 		modelsDeployGroup.GET("/:namespace/:name/run/:id", repoCommonHandler.DeployDetail)
 		modelsDeployGroup.GET("/:namespace/:name/run/:id/status", repoCommonHandler.DeployStatus)
-		modelsDeployGroup.GET("/:namespace/:name/run/:id/logs/:instance", repoCommonHandler.DeployInstanceLogs)
+		modelsDeployGroup.GET("/:namespace/:name/run/:id/logs", repoCommonHandler.DeployInstanceLogs)
 		modelsDeployGroup.PUT("/:namespace/:name/run/:id", repoCommonHandler.DeployUpdate)
 		modelsDeployGroup.PUT("/:namespace/:name/run/:id/stop", modelHandler.DeployStop)
 		modelsDeployGroup.PUT("/:namespace/:name/run/:id/start", modelHandler.DeployStart)
@@ -695,7 +704,7 @@ func createModelRoutes(config *config.Config,
 		// delete a finetune instance
 		modelsDeployGroup.DELETE("/:namespace/:name/finetune/:id", modelHandler.FinetuneDelete)
 		// get finetune instance logs
-		modelsDeployGroup.GET("/:namespace/:name/finetune/:id/logs/:instance", repoCommonHandler.FinetuneInstanceLogs)
+		modelsDeployGroup.GET("/:namespace/:name/finetune/:id/logs", repoCommonHandler.FinetuneInstanceLogs)
 	}
 
 	modelsMonitorGroup := modelsGroup.Group("")
@@ -728,7 +737,7 @@ func createModelRoutes(config *config.Config,
 		modelsServerlessGroup.PUT("/:namespace/:name/serverless/:id/stop", middlewareCollection.Auth.NeedAdmin, modelHandler.ServerlessStop)
 		modelsServerlessGroup.GET("/:namespace/:name/serverless/:id", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessDetail)
 		modelsServerlessGroup.GET("/:namespace/:name/serverless/:id/status", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessStatus)
-		modelsServerlessGroup.GET("/:namespace/:name/serverless/:id/logs/:instance", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessLogs)
+		modelsServerlessGroup.GET("/:namespace/:name/serverless/:id/logs", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessLogs)
 		modelsServerlessGroup.GET("/:namespace/:name/serverless/:id/versions/:commit_id", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessVersionLogs)
 		modelsServerlessGroup.PUT("/:namespace/:name/serverless/:id", middlewareCollection.Auth.NeedAdmin, repoCommonHandler.ServerlessUpdate)
 	}
@@ -859,7 +868,7 @@ func createNotebookRoutes(
 		// update notebook
 		notebooks.PUT("/:id", middlewareCollection.Auth.NeedLogin, notebookHandler.Update)
 		notebooks.GET("/:id/status", middlewareCollection.Auth.NeedLogin, notebookHandler.Status)
-		notebooks.GET("/:id/logs/:instance", middlewareCollection.Auth.NeedLogin, notebookHandler.Logs)
+		notebooks.GET("/:id/logs", middlewareCollection.Auth.NeedLogin, notebookHandler.Logs)
 		// stop a notebook
 		notebooks.PUT("/:id/stop", middlewareCollection.Auth.NeedLogin, notebookHandler.Stop)
 		// start a notebook
@@ -886,6 +895,8 @@ func createSpaceRoutes(config *config.Config,
 		// show a user or org's space
 		spaces.GET("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Show)
 		spaces.PUT("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Update)
+		// get supported cuda versions
+		spaces.GET("/:namespace/:name/cuda-versions/:resource_type", middlewareCollection.Auth.NeedLogin, spaceHandler.GetSupportedCUDAVersions)
 		spaces.DELETE("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Delete)
 		// depoly and start running the space
 		spaces.POST("/:namespace/:name/run", middlewareCollection.Auth.NeedLogin, spaceHandler.Run)
@@ -934,7 +945,7 @@ func createSpaceRoutes(config *config.Config,
 		spaces.GET("/:namespace/:name/run", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployList)
 		spaces.GET("/:namespace/:name/run/:id", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployDetail)
 		spaces.GET("/:namespace/:name/run/:id/status", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployStatus)
-		spaces.GET("/:namespace/:name/run/:id/logs/:instance", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployInstanceLogs)
+		spaces.GET("/:namespace/:name/run/:id/logs", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployInstanceLogs)
 	}
 	spaceMonitorGroup := spaces.Group("")
 	spaceMonitorGroup.Use(middlewareCollection.Auth.NeedLogin)
@@ -1225,6 +1236,22 @@ func createDataflowRoutes(apiGroup *gin.RouterGroup, dataflowHandler *handler.Da
 	dataflowGrp := apiGroup.Group("/dataflow")
 	dataflowGrp.Use(middleware.MustLogin())
 	dataflowGrp.Any("/*any", dataflowHandler.Proxy)
+}
+
+func createMemoryRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware.MiddlewareCollection, memoryHandler *handler.MemoryHandler) {
+	memoryGroup := apiGroup.Group("/memory")
+	memoryGroup.Use(middlewareCollection.Auth.NeedLogin)
+	{
+		memoryGroup.POST("/projects", memoryHandler.CreateProject)
+		memoryGroup.POST("/projects/get", memoryHandler.GetProject)
+		memoryGroup.POST("/projects/list", memoryHandler.ListProjects)
+		memoryGroup.POST("/projects/delete", memoryHandler.DeleteProject)
+		memoryGroup.POST("/memories", memoryHandler.AddMemories)
+		memoryGroup.POST("/memories/search", memoryHandler.SearchMemories)
+		memoryGroup.POST("/memories/list", memoryHandler.ListMemories)
+		memoryGroup.POST("/memories/delete", memoryHandler.DeleteMemories)
+		memoryGroup.GET("/health", memoryHandler.Health)
+	}
 }
 
 func createCSGBotRoutes(apiGroup *gin.RouterGroup, csgbotHandler *handler.CSGBotProxyHandler) {

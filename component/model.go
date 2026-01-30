@@ -447,7 +447,6 @@ func (c *modelComponentImpl) Delete(ctx context.Context, namespace, name, curren
 func (c *modelComponentImpl) Show(ctx context.Context, namespace, name, currentUser string, needOpWeight, needMultiSync bool) (*types.Model, error) {
 	var (
 		tags             []types.RepoTag
-		syncStatus       types.RepositorySyncStatus
 		mirrorTaskStatus types.MirrorTaskStatus
 	)
 	model, err := c.modelStore.FindByPath(ctx, namespace, name)
@@ -487,7 +486,7 @@ func (c *modelComponentImpl) Show(ctx context.Context, namespace, name, currentU
 		return nil, newError
 	}
 
-	mirrorTaskStatus, syncStatus = c.repoComponent.GetMirrorTaskStatusAndSyncStatus(model.Repository)
+	mirrorTaskStatus = c.repoComponent.GetMirrorTaskStatus(model.Repository)
 
 	resModel := &types.Model{
 		ID:            model.ID,
@@ -513,7 +512,7 @@ func (c *modelComponentImpl) Show(ctx context.Context, namespace, name, currentU
 		WidgetType:          types.ModelWidgetTypeGeneration,
 		UserLikes:           likeExists,
 		Source:              model.Repository.Source,
-		SyncStatus:          syncStatus,
+		SyncStatus:          model.Repository.SyncStatus,
 		BaseModel:           model.BaseModel,
 		License:             model.Repository.License,
 		MirrorLastUpdatedAt: model.Repository.Mirror.LastUpdatedAt,
@@ -1066,7 +1065,8 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 
 	// only vllm and sglang support multi-host inference
 	if hardware.Replicas > 1 {
-		if frame.FrameName != "vllm" && frame.FrameName != "sglang" {
+		frameNameLower := strings.ToLower(frame.FrameName)
+		if !strings.Contains(frameNameLower, "vllm") && !strings.Contains(frameNameLower, "sglang") {
 			return -1, errorx.ErrMultiHostInferenceNotSupported
 		}
 		if req.MinReplica < 1 {
@@ -1351,10 +1351,6 @@ func (c *modelComponentImpl) ListQuantizations(ctx context.Context, namespace, n
 	if err != nil {
 		return nil, fmt.Errorf("failed to find model, error: %w", err)
 	}
-	if !isGGUFModel(repo) {
-		//no need to get quantization files for non gguf models
-		return nil, nil
-	}
 	files, err := getAllFiles(ctx, namespace, name, "", types.ModelRepo, repo.DefaultBranch, c.gitServer.GetTree)
 	if err != nil {
 		return nil, fmt.Errorf("get RepoFileTree for relation, %w", err)
@@ -1383,6 +1379,12 @@ func GetBuiltInTaskFromTags(tags []database.Tag) string {
 			return string(types.FeatureExtraction)
 		}
 		if tag.Name == string(types.ImageText2Text) {
+			return tag.Name
+		}
+		if tag.Name == string(types.Text2Video) {
+			return tag.Name
+		}
+		if tag.Name == string(types.Image2Video) {
 			return tag.Name
 		}
 		if tag.Name == string(types.TextToSpeech) {

@@ -187,7 +187,7 @@ type RepoComponent interface {
 	IsSyncing(ctx context.Context, repoType types.RepositoryType, namespace, name string) (bool, error)
 	ChangePath(ctx context.Context, req types.ChangePathReq) error
 	BatchMigrateRepoToHashedPath(ctx context.Context, auto bool, batchSize int, lastID int64) (int64, error)
-	GetMirrorTaskStatusAndSyncStatus(repo *database.Repository) (types.MirrorTaskStatus, types.RepositorySyncStatus)
+	GetMirrorTaskStatus(repo *database.Repository) types.MirrorTaskStatus
 	CheckDeployPermissionForUser(ctx context.Context, deployReq types.DeployActReq) (*database.User, *database.Deploy, error)
 	DeletePendingDeletion(ctx context.Context) error
 	GetRepos(ctx context.Context, search, currentUser string, repoType types.RepositoryType) ([]string, error)
@@ -2396,8 +2396,8 @@ func (c *repoComponentImpl) DeleteDeploy(ctx context.Context, delReq types.Deplo
 
 	exist, err := c.deployer.Exist(ctx, deployRepo)
 	if err != nil {
-		// fail to check service
-		return err
+		//add deploy id and repo in the log
+		slog.Warn("fail to check deploy instance exist in remote cluster, will delete deploy instance in database", slog.Any("deploy id", delReq.DeployID), slog.Any("repo", deployRepo.Name))
 	}
 
 	if exist {
@@ -3500,20 +3500,23 @@ func (c *repoComponentImpl) CommitFiles(ctx context.Context, req types.CommitFil
 	}
 
 	for _, lfsFile := range lfsFiles {
-		e, err := c.xnetClient.FileExists(ctx, lfsFile.Oid)
-		if err != nil {
-			continue
-		}
-		if e {
-			_, err := c.lfsMetaObjectStore.UpdateOrCreate(ctx, database.LfsMetaObject{
-				Oid:          lfsFile.Oid,
-				Size:         lfsFile.Size,
-				Existing:     true,
-				RepositoryID: repo.ID,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to update or create lfs meta object, err: %w", err)
+		if repo.XnetEnabled {
+			lfsExistReq := &types.XetFileExistsReq{
+				RepoID:    strconv.FormatInt(repo.ID, 10),
+				ObjectKey: lfsFile.Oid,
 			}
+			if lfsFileExist, err := c.xnetClient.FileExists(ctx, lfsExistReq); err != nil || !lfsFileExist {
+				return fmt.Errorf("failed to request xnet, exist:%t err: %w", lfsFileExist, err)
+			}
+		}
+		_, err := c.lfsMetaObjectStore.UpdateOrCreate(ctx, database.LfsMetaObject{
+			Oid:          lfsFile.Oid,
+			Size:         lfsFile.Size,
+			Existing:     true,
+			RepositoryID: repo.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update or create lfs meta object, err: %w", err)
 		}
 	}
 
@@ -3955,25 +3958,16 @@ func (c *repoComponentImpl) migrateRepoToHashedPath(ctx context.Context, repo *d
 	return nil
 }
 
-func (c *repoComponentImpl) GetMirrorTaskStatusAndSyncStatus(repo *database.Repository) (types.MirrorTaskStatus, types.RepositorySyncStatus) {
+func (c *repoComponentImpl) GetMirrorTaskStatus(repo *database.Repository) types.MirrorTaskStatus {
 	var (
-		syncStatus       types.RepositorySyncStatus
 		mirrorTaskStatus types.MirrorTaskStatus
 	)
-	if repo.Mirror.ID != 0 {
-		syncStatus = common.MirrorTaskStatusToRepoStatus(repo.Mirror.Status)
-	}
 
 	if repo.Mirror.CurrentTask != nil {
-		syncStatus = common.MirrorTaskStatusToRepoStatus(repo.Mirror.CurrentTask.Status)
 		mirrorTaskStatus = repo.Mirror.CurrentTask.Status
 	}
 
-	if syncStatus == "" {
-		syncStatus = repo.SyncStatus
-	}
-
-	return mirrorTaskStatus, syncStatus
+	return mirrorTaskStatus
 }
 
 func (c *repoComponentImpl) RandomPath() []string {

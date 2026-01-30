@@ -88,6 +88,8 @@ const (
 
 	TextGeneration     PipelineTask    = "text-generation"
 	Text2Image         PipelineTask    = "text-to-image"
+	Text2Video         PipelineTask    = "text-to-video"
+	Image2Video        PipelineTask    = "image-to-video"
 	ImageText2Text     PipelineTask    = "image-text-to-text"
 	FeatureExtraction  PipelineTask    = "feature-extraction"
 	SentenceSimilarity PipelineTask    = "sentence-similarity"
@@ -222,6 +224,7 @@ type DeployRepo struct {
 
 	Since    string `json:"since,omitempty"`
 	CommitID string `json:"commit_id,omitempty"`
+	Instance string `json:"instance,omitempty"`
 }
 
 type RuntimeFrameworkReq struct {

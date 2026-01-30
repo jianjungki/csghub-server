@@ -562,6 +562,8 @@ func (h *SpaceHandler) Logs(ctx *gin.Context) {
 		return
 	}
 
+	instance := ctx.Query("instance")
+
 	currentUser := httpbase.GetCurrentUser(ctx)
 	allow, err := h.repo.AllowReadAccess(ctx.Request.Context(), types.SpaceRepo, namespace, name, currentUser)
 	if err != nil {
@@ -583,7 +585,7 @@ func (h *SpaceHandler) Logs(ctx *gin.Context) {
 	ctx.Writer.Header().Set("Transfer-Encoding", "chunked")
 
 	//user http request context instead of gin context, so that server knows the life cycle of the request
-	logReader, err := h.space.Logs(ctx.Request.Context(), namespace, name, since)
+	logReader, err := h.space.Logs(ctx.Request.Context(), namespace, name, since, instance)
 	if err != nil {
 		if deadline, ok := ctx.Request.Context().Deadline(); ok {
 			slog.ErrorContext(ctx.Request.Context(), "failed to get space logs",
@@ -639,6 +641,31 @@ func (h *SpaceHandler) Logs(ctx *gin.Context) {
 			time.Sleep(time.Second)
 		}
 	}
+}
+
+// @Summary      Get supported CUDA versions
+// @Description  Get supported CUDA versions for a space
+// @Tags         Space
+// @Security     ApiKey
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "namespace"
+// @Param        name path string true "name"
+// @Param        resource_type query string true "resource_type"
+// @Success      200  {object}  types.Response{data=[]string} "Success"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /spaces/{namespace}/{name}/cuda-versions/{resource_type} [get]
+func (h *SpaceHandler) GetSupportedCUDAVersions(ctx *gin.Context) {
+	resourceType := ctx.Param("resource_type")
+	versions, err := h.space.GetSupportedCUDAVersions(ctx.Request.Context(), resourceType)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "failed to get supported cuda versions", "error", err)
+		httpbase.ServerError(ctx, err)
+		return
+	}
+
+	httpbase.OK(ctx, versions)
 }
 
 func (h *SpaceHandler) testLogs(ctx *gin.Context) {
