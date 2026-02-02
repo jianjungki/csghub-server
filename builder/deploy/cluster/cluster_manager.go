@@ -428,6 +428,10 @@ func (cluster *Cluster) GetResourcesInCluster(config *config.Config) (map[string
 		nodeResourcesMap[pod.Spec.NodeName] = nodeResource
 	}
 
+	for k, v := range nodeResourcesMap {
+		nodeResourcesMap[k] = *calcSingleNodeXPUMem(&v)
+	}
+
 	return nodeResourcesMap, nil
 }
 
@@ -590,6 +594,10 @@ func getXPULabel(labels map[string]string, config *config.Config) (string, strin
 	if _, found := labels["enflame.com/gcu.count"]; found {
 		//for enflame gcu
 		return "enflame.com/gcu.count", "enflame.com/gcu.model", "enflame.com/gcu.mem"
+	}
+	if _, found := labels["amd.com/gpu"]; found {
+		//for enflame gcu
+		return "amd.com/gpu", "amd.com/gpu.product-name", "amd.com/gpu.vram"
 	}
 	//check custom gpu model label
 	if config.Space.GPUModelLabel != "" {

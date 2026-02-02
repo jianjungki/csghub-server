@@ -249,6 +249,8 @@ func NewTestModelComponent(
 		runtimeFrameworksStore:    stores.RuntimeFramework,
 		userSvcClient:             userSvcClient,
 		runtimeArchitecturesStore: stores.RuntimeArch,
+		mirrorStore:               stores.Mirror,
+		lfsMetaObjectStore:        stores.LfsMetaObject,
 	}
 }
 
@@ -378,6 +380,7 @@ func NewTestDatasetComponent(config *config.Config, stores *tests.MockStores, re
 		userLikesStore:     stores.UserLikes,
 		userSvcClient:      userSvcClient,
 		recomStore:         stores.Recom,
+		lfsMetaObjectStore: stores.LfsMetaObject,
 	}
 }
 
