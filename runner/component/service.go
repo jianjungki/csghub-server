@@ -35,6 +35,7 @@ import (
 	"opencsg.com/csghub-server/common/types"
 	utils "opencsg.com/csghub-server/common/utils/common"
 	rcommon "opencsg.com/csghub-server/runner/common"
+	sched "opencsg.com/csghub-server/runner/component/kube_scheduler"
 )
 
 var (
@@ -287,6 +288,11 @@ func (s *serviceComponentImpl) generateService(ctx context.Context, cluster *clu
 			NodeAffinity: nodeAffinity,
 		}
 	}
+
+	// Apply scheduler configuration
+	applier := sched.NewApplier(request.Scheduler)
+	applier.ApplyToKnative(&service.Spec.ConfigurationSpec.Template, request)
+
 	return service, nil
 }
 
@@ -838,6 +844,9 @@ func (s *serviceComponentImpl) updateServiceInDB(svc v1.Service, clusterID strin
 		oldService.DesiredReplica = desiredReplicas
 		oldService.ActualReplica = int(deployment.Status.Replicas)
 	}
+	if pod != nil {
+		oldService.ClusterNode = pod.Spec.NodeName
+	}
 
 	err = s.updateKServiceWithEvent(ctx, oldService, status)
 	if err != nil {
@@ -1341,6 +1350,8 @@ func (s *serviceComponentImpl) addKServiceWithEvent(ctx context.Context, ksvc *d
 		Endpoint:    ksvc.Endpoint,
 		Reason:      "create",
 		TaskID:      ksvc.TaskID,
+		ClusterNode: ksvc.ClusterNode,
+		QueueName:   ksvc.QueueName,
 	}
 	s.pushEvent(types.RunnerServiceCreate, createEvent, ksvc.ClusterID)
 	slog.Debug("pushed create event in addKServiceWithEvent", slog.Any("createEvent", createEvent))
@@ -1360,6 +1371,8 @@ func (s *serviceComponentImpl) updateKServiceWithEvent(ctx context.Context, ksvc
 			Message:     status.Message,
 			Reason:      status.Reason,
 			TaskID:      ksvc.TaskID,
+			ClusterNode: ksvc.ClusterNode,
+			QueueName:   ksvc.QueueName,
 		}
 		s.pushEvent(types.RunnerServiceChange, updateEvent, ksvc.ClusterID)
 	}

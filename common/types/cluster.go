@@ -27,6 +27,19 @@ type ClusterEvent struct {
 	Mode             ClusterMode   `json:"mode"`              // InCluster | kubeconfig
 	AppEndpoint      string        `json:"app_endpoint"`      // address of space/inference application
 }
+type HardwareInfo struct {
+	Region    string `json:"region"`
+	GPUVendor string `json:"gpu_vendor"`
+	XPUModel  string `json:"xpu_model"`
+	XPUMem    int64  `json:"xpu_mem"`
+}
+
+type PublicClusterRes struct {
+	Regions    []string       `json:"region"`
+	GPUVendors []string       `json:"gpu_vendor"`
+	Hardware   []HardwareInfo `json:"hardware"`
+}
+
 type ClusterRes struct {
 	ClusterID        string             `json:"cluster_id"`
 	Status           ClusterStatus      `json:"status" i18n:"cluster.status"` //active, inactive
@@ -85,10 +98,19 @@ type VXPU struct {
 }
 
 type ProcessInfo struct {
-	PodName  string `json:"pod_name"`
-	DeployID int64  `json:"deploy_id"`
-	SvcName  string `json:"svc_name"`
-	VXPUs    []VXPU `json:"vxpus"`
+	PodName      string `json:"pod_name"`
+	DeployID     string `json:"deploy_id"`
+	SvcName      string `json:"svc_name"`
+	VXPUs        []VXPU `json:"vxpus"`
+	WorkflowName string `json:"workflow_name"`
+	ClusterNode  string `json:"cluster_node"`
+}
+
+type MIGResource struct {
+	Capacity    int64 `json:"capacity"`
+	Allocatable int64 `json:"allocatable"`
+	Requests    int64 `json:"requests"`
+	Limits      int64 `json:"limits"`
 }
 
 type NodeHardware struct {
@@ -109,6 +131,8 @@ type NodeHardware struct {
 	UsedVXPUNum      int64  `json:"used_vxpu_num"`      // used vxpu num
 	TotalVXPUMem     int64  `json:"total_vxpu_mem"`     // total mem in MB
 	AvailableVXPUMem int64  `json:"available_vxpu_mem"` // available mem in MB
+
+	MIGs map[string]*MIGResource `json:"migs"` // mig resources
 }
 
 type NodeResourceInfo struct {
