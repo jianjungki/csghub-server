@@ -1,0 +1,107 @@
+time="2026-02-02T09:56:43.081Z" level=info msg="grpc prometheus histograms enabled" latencies="[0.001 0.005 0.025 0.1 0.5 1 10 30 60 300 1500]" pid=1
+time="2026-02-02T09:56:45.126Z" level=info msg="License database preloaded" pid=1
+time="2026-02-02T09:56:45.127Z" level=info msg="Starting Gitaly, version 16.4.6" pid=1
+time="2026-02-02T09:56:45.229Z" level=info msg="clearing disk cache object folder" pid=1 storage=default
+time="2026-02-02T09:56:45.229Z" level=info msg="counting repositories" pid=1
+time="2026-02-02T09:56:45.230Z" level=info msg="starting to count repositories in path \"/home/git/repositories\"" pid=1
+time="2026-02-02T09:56:45.229Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=0
+time="2026-02-02T09:56:45.237Z" level=info msg="completed counting repositories in path \"/home/git/repositories\" after 6.776675ms" pid=1
+time="2026-02-02T09:56:45.237Z" level=info msg="completed counting all repositories after 7.653178ms" pid=1
+time="2026-02-02T09:56:45.242Z" level=info msg="moving disk cache object folder to /home/git/repositories/+gitaly/tmp/diskcache769841529" pid=1 storage=default
+time="2026-02-02T09:56:45.247Z" level=info msg="disk cache object folder doesn't exist, no need to remove" pid=1 storage=default
+time="2026-02-02T09:56:45.247Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/cache" path=/home/git/repositories/+gitaly/cache pid=1
+time="2026-02-02T09:56:45.247Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/state" path=/home/git/repositories/+gitaly/state pid=1
+time="2026-02-02T09:56:45.255Z" level=info msg="cleared all cache object files in /home/git/repositories/+gitaly/tmp/diskcache769841529 after 7.81434ms" pid=1 storage=default
+time="2026-02-02T09:56:45.270Z" level=info msg="listening at unix address" address=/tmp/gitaly-3684454048/sock.d/intern pid=1
+time="2026-02-02T09:56:45.270Z" level=info msg="listening at tcp address" address="0.0.0.0:9999" pid=1
+time="2026-02-02T09:56:45.271Z" level=info msg="maintenance: daily scheduled" pid=1 scheduled="2026-02-02 12:00:00 +0000 UTC"
+unclean Gitaly shutdown: received signal "terminated"
+time="2026-02-02T10:09:29.258Z" level=info msg="grpc prometheus histograms enabled" latencies="[0.001 0.005 0.025 0.1 0.5 1 10 30 60 300 1500]" pid=1
+time="2026-02-02T10:09:31.043Z" level=info msg="License database preloaded" pid=1
+time="2026-02-02T10:09:31.044Z" level=info msg="Starting Gitaly, version 16.4.6" pid=1
+time="2026-02-02T10:09:31.158Z" level=info msg="counting repositories" pid=1
+time="2026-02-02T10:09:31.159Z" level=info msg="starting to count repositories in path \"/home/git/repositories\"" pid=1
+time="2026-02-02T10:09:31.158Z" level=info msg="clearing disk cache object folder" pid=1 storage=default
+time="2026-02-02T10:09:31.168Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-02T10:09:31.169Z" level=info msg="completed counting repositories in path \"/home/git/repositories\" after 9.167412ms" pid=1
+time="2026-02-02T10:09:31.169Z" level=info msg="completed counting all repositories after 10.326302ms" pid=1
+time="2026-02-02T10:09:31.172Z" level=info msg="moving disk cache object folder to /home/git/repositories/+gitaly/tmp/diskcache3905404178" pid=1 storage=default
+time="2026-02-02T10:09:31.178Z" level=info msg="disk cache object folder doesn't exist, no need to remove" pid=1 storage=default
+time="2026-02-02T10:09:31.178Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/cache" path=/home/git/repositories/+gitaly/cache pid=1
+time="2026-02-02T10:09:31.179Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/state" path=/home/git/repositories/+gitaly/state pid=1
+time="2026-02-02T10:09:31.184Z" level=info msg="listening at unix address" address=/tmp/gitaly-2236496861/sock.d/intern pid=1
+time="2026-02-02T10:09:31.185Z" level=info msg="listening at tcp address" address="0.0.0.0:9999" pid=1
+time="2026-02-02T10:09:31.186Z" level=info msg="maintenance: daily scheduled" pid=1 scheduled="2026-02-02 12:00:00 +0000 UTC"
+time="2026-02-02T10:09:31.186Z" level=info msg="cleared all cache object files in /home/git/repositories/+gitaly/tmp/diskcache3905404178 after 7.236435ms" pid=1 storage=default
+time="2026-02-03T02:48:30.459Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=54
+unclean Gitaly shutdown: received signal "terminated"
+time="2026-02-03T04:15:22.206Z" level=info msg="grpc prometheus histograms enabled" latencies="[0.001 0.005 0.025 0.1 0.5 1 10 30 60 300 1500]" pid=1
+time="2026-02-03T04:15:24.150Z" level=info msg="License database preloaded" pid=1
+time="2026-02-03T04:15:24.151Z" level=info msg="Starting Gitaly, version 16.4.6" pid=1
+time="2026-02-03T04:15:24.379Z" level=info msg="counting repositories" pid=1
+time="2026-02-03T04:15:24.381Z" level=info msg="starting to count repositories in path \"/home/git/repositories\"" pid=1
+time="2026-02-03T04:15:24.380Z" level=info msg="clearing disk cache object folder" pid=1 storage=default
+time="2026-02-03T04:15:24.386Z" level=info msg="moving disk cache object folder to /home/git/repositories/+gitaly/tmp/diskcache1858847417" pid=1 storage=default
+time="2026-02-03T04:15:24.388Z" level=info msg="completed counting repositories in path \"/home/git/repositories\" after 7.533184ms" pid=1
+time="2026-02-03T04:15:24.389Z" level=info msg="completed counting all repositories after 8.436736ms" pid=1
+time="2026-02-03T04:15:24.389Z" level=info msg="disk cache object folder doesn't exist, no need to remove" pid=1 storage=default
+time="2026-02-03T04:15:24.390Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/cache" path=/home/git/repositories/+gitaly/cache pid=1
+time="2026-02-03T04:15:24.391Z" level=info msg="Starting file walker for /home/git/repositories/+gitaly/state" path=/home/git/repositories/+gitaly/state pid=1
+time="2026-02-03T04:15:24.393Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=13
+time="2026-02-03T04:15:24.398Z" level=info msg="cleared all cache object files in /home/git/repositories/+gitaly/tmp/diskcache1858847417 after 7.376302ms" pid=1 storage=default
+time="2026-02-03T04:15:24.398Z" level=info msg="listening at unix address" address=/tmp/gitaly-2967943263/sock.d/intern pid=1
+time="2026-02-03T04:15:24.399Z" level=info msg="listening at tcp address" address="0.0.0.0:9999" pid=1
+time="2026-02-03T04:15:24.400Z" level=info msg="maintenance: daily scheduled" pid=1 scheduled="2026-02-03 12:00:00 +0000 UTC"
+time="2026-02-03T05:15:24.405Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=11
+time="2026-02-03T06:15:24.420Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-03T07:15:24.435Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=11
+time="2026-02-03T08:15:24.453Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=14
+time="2026-02-03T09:15:24.469Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=12
+time="2026-02-03T10:15:24.482Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-03T11:15:24.497Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=13
+time="2026-02-03T12:00:00.004Z" level=info msg="maintenance: daily starting" max_duration=600000000000 pid=1
+time="2026-02-03T12:00:00.011Z" level=info msg="maintenance: optimizing repos in storage" pid=1 storage_path=/home/git/repositories
+time="2026-02-03T12:00:00.053Z" level=info msg="maintenance: daily completed" actual_duration=52.811183ms error="<nil>" max_duration=600000000000 pid=1
+time="2026-02-03T12:00:00.057Z" level=info msg="maintenance: daily scheduled" pid=1 scheduled="2026-02-04 12:00:00 +0000 UTC"
+time="2026-02-03T12:15:24.510Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-03T13:15:24.529Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=17
+time="2026-02-03T14:15:24.540Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=9
+time="2026-02-03T15:15:24.550Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-03T16:15:24.559Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=8
+time="2026-02-03T17:15:24.567Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-03T18:15:24.574Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=5
+time="2026-02-03T19:15:24.581Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-03T20:15:24.589Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-03T21:15:24.596Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=5
+time="2026-02-03T22:15:24.604Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-03T23:15:24.612Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-04T00:15:24.621Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=8
+time="2026-02-04T01:15:24.635Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=12
+time="2026-02-04T02:15:24.646Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=8
+time="2026-02-04T03:15:24.659Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=9
+time="2026-02-04T04:55:21.040Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=13
+time="2026-02-04T05:55:21.054Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-04T06:56:26.146Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-04T07:56:26.163Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=9
+time="2026-02-04T08:56:26.178Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=11
+time="2026-02-04T09:56:26.188Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=8
+time="2026-02-04T10:56:26.210Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-04T11:56:45.704Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=11
+time="2026-02-04T12:41:20.926Z" level=info msg="maintenance: daily starting" max_duration=600000000000 pid=1
+time="2026-02-04T12:41:20.934Z" level=info msg="maintenance: optimizing repos in storage" pid=1 storage_path=/home/git/repositories
+time="2026-02-04T12:41:20.974Z" level=info msg="maintenance: daily completed" actual_duration=52.261139ms error="<nil>" max_duration=600000000000 pid=1
+time="2026-02-04T12:41:20.976Z" level=info msg="maintenance: daily scheduled" pid=1 scheduled="2026-02-05 12:00:00 +0000 UTC"
+time="2026-02-04T12:56:45.720Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=12
+time="2026-02-04T13:56:45.730Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=8
+time="2026-02-04T14:56:45.742Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=10
+time="2026-02-04T15:56:45.752Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-04T16:56:45.760Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=5
+time="2026-02-04T17:56:45.781Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=19
+time="2026-02-04T18:56:45.788Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-04T19:56:45.801Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=12
+time="2026-02-04T20:56:45.809Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-04T21:56:45.817Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=6
+time="2026-02-04T22:56:45.827Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=7
+time="2026-02-04T23:56:45.834Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=5
+time="2026-02-05T00:56:45.845Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=9
+time="2026-02-05T01:56:45.858Z" level=info msg="finished tempdir cleaner walk" pid=1 storage=default time_ms=11

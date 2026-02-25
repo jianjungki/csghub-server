@@ -12,7 +12,7 @@ services:
       test: pg_isready -U postgres -h 127.0.0.1
       interval: 5s
     volumes:
-      - ./data/pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     networks:
       - my_ce_network
 
@@ -296,3 +296,6 @@ services:
 networks:
   my_ce_network:
     driver: bridge
+
+volumes:
+  pgdata:

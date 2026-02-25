@@ -1,0 +1,110 @@
+@startuml
+!theme plain
+title CSGHub Server Architecture
+
+actor User
+
+node "CSGHub Portal" as Portal
+node "Load Balancer (nginx)" as LB
+
+Portal --> LB : https
+
+package "CSGHub Server" {
+    package "API+CLI" {
+        component "API Handler" as ApiHandler
+        component "Http Router" as HttpRouter
+        component "Trigger" as CliTrigger
+        component "Migration" as CliMigration
+        component "Cron Job" as CliCron
+    }
+
+    package "Component" {
+        component "Model"
+        component "Dataset"
+        component "Member"
+        component "Sensitive"
+        component "Auto Tag"
+        component "DatasetViewer"
+        component "Activity"
+        component "Organization"
+        component "AccessToken"
+        component "SSH"
+        component "Callback"
+    }
+
+    package "Builder" {
+        interface "Cache"
+        interface "Data Base Interface" as DBInterface
+        interface "Sensitive Checker Interface" as SCInterface
+        interface "DataSet Reader Interface" as DRInterface
+        interface "Git Server Interface" as GSInterface
+        interface "Object Storage Client (S3)" as S3Client
+    }
+}
+
+
+package "External" {
+    node "Bun"
+    node "Aliyun Green"
+    node "DuckDB"
+    node "MinIO"
+    node "GitServer (gitea/gitlab etc)" as GitServer
+    database "Database" as MainDB
+    cloud "Content Moderation" as CM
+    cloud "Object Storage" as OS
+    storage "LFS Storage" as LFS
+}
+
+' Connections
+User --> Portal
+User --> GitServer : ssh clone
+
+LB --> HttpRouter
+
+HttpRouter --> ApiHandler
+
+ApiHandler --> Model
+ApiHandler --> Dataset
+ApiHandler --> Member
+ApiHandler --> Organization
+ApiHandler --> AccessToken
+ApiHandler --> DatasetViewer
+ApiHandler --> Activity
+ApiHandler --> Sensitive
+ApiHandler --> "Auto Tag"
+ApiHandler --> SSH
+ApiHandler --> Callback
+
+Model --> DBInterface
+Dataset --> DBInterface
+Member --> DBInterface
+Organization --> DBInterface
+AccessToken --> DBInterface
+Activity --> DBInterface
+
+DatasetViewer --> DRInterface
+Sensitive --> SCInterface
+Callback --> GSInterface
+SSH --> GSInterface
+
+DBInterface --> Bun
+Bun --> MainDB
+
+SCInterface --> "Aliyun Green"
+"Aliyun Green" --> CM
+
+DRInterface --> DuckDB
+DuckDB --> OS : s3
+
+S3Client --> MinIO
+MinIO --> OS
+MinIO --> LFS
+
+GSInterface --> GitServer
+GitServer -left-> MinIO : lfs
+
+' Layout hints
+ApiHandler -[hidden]down- Model
+Model -[hidden]down- DBInterface
+
+@enduml
