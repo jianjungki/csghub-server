@@ -232,7 +232,7 @@ func (wc *workFlowComponentImpl) DeleteWorkflowInargo(ctx context.Context, delet
 	// for deleted case,check if the workflow did not finish
 	if wf.Status == v1alpha1.WorkflowPending || wf.Status == v1alpha1.WorkflowRunning {
 		wf.Status = v1alpha1.WorkflowFailed
-		wf.Reason = "deleted by admin"
+		wf.Reason = "deleted by system, please check if your required resources are sufficient or if your account has enough credit"
 		slog.InfoContext(ctx, "DeleteWorkflowInargo-report", slog.Any("name", wf.TaskId), slog.Any("result-url", wf.ResultURL))
 		_, err = wc.wf.UpdateWorkFlow(ctx, wf)
 		if err != nil {
@@ -257,7 +257,7 @@ func (wc *workFlowComponentImpl) FindWorkFlows(ctx context.Context, username str
 func generateWorkflow(req types.ArgoWorkFlowReq, config *config.Config) *v1alpha1.Workflow {
 	templates := []v1alpha1.Template{}
 	for _, v := range req.Templates {
-		resReq, _ := GenerateResources(v.HardWare)
+		resReq, _, nodeAffinity := generateResources(v.HardWare, req.Nodes)
 		environments := []corev1.EnvVar{}
 		for key, value := range v.Env {
 			environments = append(environments, corev1.EnvVar{Name: key, Value: value})
@@ -312,6 +312,15 @@ func generateWorkflow(req types.ArgoWorkFlowReq, config *config.Config) *v1alpha
 				Resources:       resources,
 				ImagePullPolicy: corev1.PullAlways,
 			},
+			Affinity: &corev1.Affinity{
+				NodeAffinity: nodeAffinity,
+			},
+		}
+
+		if nodeAffinity != nil {
+			temp.Affinity = &corev1.Affinity{
+				NodeAffinity: nodeAffinity,
+			}
 		}
 
 		if req.TaskType == types.TaskTypeEvaluation {

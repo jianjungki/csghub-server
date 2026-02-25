@@ -53,6 +53,7 @@ type DeployActivity struct {
 	rfs database.RuntimeFrameworksStore
 	urs database.UserResourcesStore
 	mds database.MetadataStore
+	cls database.ClusterInfoStore
 }
 
 func NewDeployActivity(
@@ -68,6 +69,7 @@ func NewDeployActivity(
 	rfs database.RuntimeFrameworksStore,
 	urs database.UserResourcesStore,
 	mds database.MetadataStore,
+	cls database.ClusterInfoStore,
 ) *DeployActivity {
 	return &DeployActivity{
 		cfg: cfg,
@@ -82,6 +84,7 @@ func NewDeployActivity(
 		rfs: rfs,
 		urs: urs,
 		mds: mds,
+		cls: cls,
 	}
 }
 
@@ -560,6 +563,19 @@ func (a *DeployActivity) createDeployRequest(ctx context.Context, task *database
 		targetID = deployInfo.ID
 	}
 
+	clusterNodes, err := a.cls.FindNodeByClusterID(ctx, deployInfo.ClusterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cluster %s nodes, error: %w", deployInfo.ClusterID, err)
+	}
+
+	requestNodes := []types.Node{}
+	for _, node := range clusterNodes {
+		requestNodes = append(requestNodes, types.Node{
+			Name:       node.Name,
+			EnableVXPU: node.EnableVXPU,
+		})
+	}
+
 	return &types.RunRequest{
 		ID:            targetID,
 		OrgName:       pathParts[0],
@@ -583,6 +599,7 @@ func (a *DeployActivity) createDeployRequest(ctx context.Context, task *database
 		Sku:           deployInfo.SKU,
 		OrderDetailID: deployInfo.OrderDetailID,
 		TaskId:        task.ID,
+		Nodes: requestNodes,
 	}, nil
 }
 
@@ -706,15 +723,25 @@ func (a *DeployActivity) makeDeployEnv(ctx context.Context, hardware types.HardW
 		switch repoInfo.Sdk {
 		case types.GRADIO.Name:
 			envMap["port"] = strconv.Itoa(types.GRADIO.Port)
+			envMap["SDK"] = types.GRADIO.Name
+			envMap["HF_ENDPOINT"] = a.cfg.ModelDownloadEndpoint
 		case types.STREAMLIT.Name:
 			envMap["port"] = strconv.Itoa(types.STREAMLIT.Port)
+			envMap["SDK"] = types.STREAMLIT.Name
+			envMap["HF_ENDPOINT"] = a.cfg.ModelDownloadEndpoint
 		case types.NGINX.Name:
 			envMap["port"] = strconv.Itoa(types.NGINX.Port)
+			envMap["SDK"] = types.NGINX.Name
+			envMap["HF_ENDPOINT"] = a.cfg.ModelDownloadEndpoint
+		case types.STREAMLIT.Name:
 		case types.DOCKER.Name:
+			envMap["SDK"] = types.DOCKER.Name
 			envMap["port"] = strconv.Itoa(deployInfo.ContainerPort)
 			envMap["HF_ENDPOINT"] = a.cfg.ModelDownloadEndpoint
 		case types.MCPSERVER.Name:
 			envMap["port"] = strconv.Itoa(types.MCPSERVER.Port)
+			envMap["SDK"] = types.MCPSERVER.Name
+			envMap["HF_ENDPOINT"] = a.cfg.ModelDownloadEndpoint
 		default:
 			envMap["port"] = strconv.Itoa(types.DefaultContainerPort)
 		}

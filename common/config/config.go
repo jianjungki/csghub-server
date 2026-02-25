@@ -129,6 +129,7 @@ type Config struct {
 		Region          string `env:"STARHUB_SERVER_SENSITIVE_CHECK_REGION"`
 		Endpoint        string `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENDPOINT" default:"oss-cn-beijing.aliyuncs.com"`
 		EnableSSL       bool   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENABLE_SSL" default:"true"`
+		DictDir         string `env:"STARHUB_SERVER_SENSITIVE_CHECK_DICT_DIR" default:"/starhub-bin/vocabulary"`
 	}
 
 	JWT struct {
@@ -263,12 +264,12 @@ type Config struct {
 	}
 
 	Moderation struct {
-		Host string `env:"OPENCSG_MODERATION_SERVER_HOST" default:"http://localhost"`
-		Port int    `env:"OPENCSG_MODERATION_SERVER_PORT" default:"8089"`
-		// comma splitted, and base64 encoded
-		EncodedSensitiveWords    string `env:"OPENCSG_MODERATION_SERVER_ENCODED_SENSITIVE_WORDS" default:"5Lmg6L+R5bmzLHhpamlucGluZw=="`
+		Host                     string `env:"OPENCSG_MODERATION_SERVER_HOST" default:"http://localhost"`
+		Port                     int    `env:"OPENCSG_MODERATION_SERVER_PORT" default:"8089"`
 		RepoFileCheckConcurrency int    `env:"OPENCSG_MODERATION_SERVER_REPO_FILE_CHECK_CONCURRENCY" default:"10"`
 	}
+
+	Memory MemoryConfig
 
 	WorkFLow struct {
 		Endpoint         string `env:"OPENCSG_WORKFLOW_SERVER_ENDPOINT" default:"localhost:7233"`
@@ -483,8 +484,9 @@ type Config struct {
 		WatchConfigmapName string `env:"STARHUB_SERVER_RUNNER_WATCH_CONFIGMAP_NAME" default:"spaces-runner-config"`
 		// WatchConfigmapKey           string `env:"STARHUB_SERVER_RUNNER_WATCH_CONFIGMAP_KEY" default:""`
 		WatchConfigmapIntervalInSec int    `env:"STARHUB_SERVER_RUNNER_WATCH_CONFIGMAP_INTERVAL_IN_SEC" default:"60"`
-		HearBeatIntervalInSec       int    `env:"STARHUB_SERVER_RUNNER_HEARTBEAT_INTERVAL_IN_SEC" default:"300"`
+		HearBeatIntervalInSec       int    `env:"STARHUB_SERVER_RUNNER_HEARTBEAT_INTERVAL_IN_SEC" default:"120"`
 		RunnerNamespace             string `env:"STARHUB_SERVER_CLUSTER_RUNNER_NAMESPACE" default:"csghub"`
+		PublicDockerRegBase         string `env:"STARHUB_SERVER_RUNNER_PUBLIC_DOCKER_REG_BASE" default:"opencsg-registry.cn-beijing.cr.aliyuncs.com"`
 	}
 
 	LogCollector struct {
@@ -540,6 +542,18 @@ type Config struct {
 		PartSize                int64 `env:"STARHUB_SERVER_STORAGE_GATEWAY_PART_SIZE" default:"67108864"`              // 64MB
 		EnablePresignedURLProxy bool  `env:"STARHUB_SERVER_STORAGE_GATEWAY_ENABLE_PRESIGNED_URL_PROXY" default:"true"` // Enable presigned URL proxy through gateway
 	}
+}
+
+type MemoryConfig struct {
+	Enable           bool   `env:"OPENCSG_MEMORY_SERVER_ENABLED" default:"true"`
+	Backend          string `env:"OPENCSG_MEMORY_BACKEND" default:"memmachine"`
+	Host             string `env:"OPENCSG_MEMORY_SERVER_HOST" default:"http://memmachine"`
+	Port             int    `env:"OPENCSG_MEMORY_SERVER_PORT" default:"8080"`
+	BasePath         string `env:"OPENCSG_MEMORY_SERVER_BASE_PATH" default:"/api/v2"`
+	ApiKey           string `env:"OPENCSG_MEMORY_SERVER_API_KEY" default:""`
+	TimeoutSeconds   int    `env:"OPENCSG_MEMORY_SERVER_TIMEOUT_SECONDS" default:"10"`
+	RetryCount       int    `env:"OPENCSG_MEMORY_SERVER_RETRY_COUNT" default:"1"`
+	RetryDelayMillis int    `env:"OPENCSG_MEMORY_SERVER_RETRY_DELAY_MILLIS" default:"100"`
 }
 
 func SetConfigFile(file string) {

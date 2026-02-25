@@ -1766,11 +1766,7 @@ func (h *RepoHandler) DeployInstanceLogs(ctx *gin.Context) {
 		httpbase.BadRequest(ctx, err.Error())
 		return
 	}
-	instance := ctx.Param("instance")
-	if len(instance) < 1 {
-		httpbase.UnauthorizedError(ctx, errors.New("fail to get deploy instance"))
-		return
-	}
+	instance := ctx.Query("instance")
 	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
 	ctx.Writer.Header().Set("Cache-Control", "no-cache")
 	ctx.Writer.Header().Set("Connection", "keep-alive")
@@ -1869,11 +1865,7 @@ func (h *RepoHandler) FinetuneInstanceLogs(ctx *gin.Context) {
 		httpbase.BadRequest(ctx, err.Error())
 		return
 	}
-	instance := ctx.Param("instance")
-	if len(instance) < 1 {
-		httpbase.UnauthorizedError(ctx, errors.New("fail to get deploy instance"))
-		return
-	}
+	instance := ctx.Query("instance")
 	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
 	ctx.Writer.Header().Set("Cache-Control", "no-cache")
 	ctx.Writer.Header().Set("Connection", "keep-alive")
@@ -2360,11 +2352,7 @@ func (h *RepoHandler) ServerlessLogs(ctx *gin.Context) {
 		httpbase.BadRequest(ctx, err.Error())
 		return
 	}
-	instance := ctx.Param("instance")
-	if len(instance) < 1 {
-		httpbase.UnauthorizedError(ctx, errors.New("fail to get deploy instance"))
-		return
-	}
+	instance := ctx.Query("instance")
 	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
 	ctx.Writer.Header().Set("Cache-Control", "no-cache")
 	ctx.Writer.Header().Set("Connection", "keep-alive")
@@ -2909,7 +2897,7 @@ func (h *RepoHandler) CommitFiles(ctx *gin.Context) {
 	err = h.c.CommitFiles(ctx.Request.Context(), req)
 	if err != nil {
 		slog.ErrorContext(ctx.Request.Context(), "failed to commit files", slog.Any("error", err))
-		httpbase.ServerError(ctx, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	httpbase.OK(ctx, nil)
@@ -2941,7 +2929,7 @@ func (h *RepoHandler) CommitFilesHF(ctx *gin.Context) {
 	err = h.c.CommitFiles(ctx.Request.Context(), *req)
 	if err != nil {
 		slog.ErrorContext(ctx.Request.Context(), "failed to commit files", slog.Any("error", err))
-		httpbase.ServerError(ctx, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{

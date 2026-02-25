@@ -11,11 +11,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	"opencsg.com/csghub-server/builder/deploy"
 	deployCommon "opencsg.com/csghub-server/builder/deploy/common"
 	"opencsg.com/csghub-server/builder/git/gitserver"
@@ -24,6 +26,11 @@ import (
 	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 	"opencsg.com/csghub-server/common/utils/common"
+)
+
+const (
+	// compatible version 1.0.3
+	EngineVersion103 = "1.0.3"
 )
 
 const spaceGitattributesContent = modelGitattributesContent
@@ -55,12 +62,13 @@ type SpaceComponent interface {
 	FixHasEntryFile(ctx context.Context, s *database.Space) *database.Space
 	Status(ctx context.Context, namespace, name string) (string, string, error)
 	StatusByPaths(ctx context.Context, paths []string) (map[string]string, error)
-	Logs(ctx context.Context, namespace, name, since string) (*deploy.MultiLogReader, error)
+	Logs(ctx context.Context, namespace, name, since, instance string) (*deploy.MultiLogReader, error)
 	// HasEntryFile checks whether space repo has entry point file to run with
 	HasEntryFile(ctx context.Context, space *database.Space) bool
 	GetByID(ctx context.Context, spaceID int64) (*database.Space, error)
 	MCPIndex(ctx context.Context, repoFilter *types.RepoFilter, per, page int) ([]*types.MCPService, int, error)
 	GetMCPServiceBySvcName(ctx context.Context, svcName string) (*types.MCPService, error)
+	GetSupportedCUDAVersions(ctx context.Context, resourceType string) ([]string, error)
 }
 
 func (c *spaceComponentImpl) Create(ctx context.Context, req types.CreateSpaceReq) (*types.Space, error) {
@@ -131,7 +139,10 @@ func (c *spaceComponentImpl) Create(ctx context.Context, req types.CreateSpaceRe
 		slog.Error("failed to create new space in db", slog.Any("req", req), slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to create new space in db, error: %w", err)
 	}
-	_ = c.git.CommitFiles(ctx, *commitFilesReq)
+	if commitFilesReq != nil {
+		_ = c.git.CommitFiles(ctx, *commitFilesReq)
+	}
+
 	dbRepo.Path = repoPath
 
 	err = c.createSpaceDefaultFiles(ctx, dbRepo, req, templatePath)
@@ -525,22 +536,122 @@ func (c *spaceComponentImpl) Index(ctx context.Context, repoFilter *types.RepoFi
 		resSpaces []*types.Space
 		err       error
 	)
-	repos, total, err := c.repoComponent.PublicToUser(ctx, types.SpaceRepo, repoFilter.Username, repoFilter, per, page)
-	if err != nil {
-		newError := fmt.Errorf("failed to get public space repos,error:%w", err)
-		return nil, 0, newError
+
+	if repoFilter.Status == "" {
+		repos, total, err := c.repoComponent.PublicToUser(ctx, types.SpaceRepo, repoFilter.Username, repoFilter, per, page)
+		if err != nil {
+			newError := fmt.Errorf("failed to get public space repos,error:%w", err)
+			return nil, 0, newError
+		}
+		resSpaces, err = c.convertReposToSpaces(ctx, repos)
+		if err != nil {
+			return nil, 0, err
+		}
+		if needOpWeight {
+			var repoIDs []int64
+			for _, s := range resSpaces {
+				repoIDs = append(repoIDs, s.RepositoryID)
+			}
+			c.addOpWeightToSpaces(ctx, repoIDs, resSpaces)
+		}
+		return resSpaces, total, nil
 	}
+
+	currentPage := page
+	maxPages := 100
+	pagesChecked := 0
+
+	for len(resSpaces) < per && pagesChecked < maxPages {
+		repos, total, err := c.repoComponent.PublicToUser(ctx, types.SpaceRepo, repoFilter.Username, repoFilter, per, currentPage)
+		if err != nil {
+			newError := fmt.Errorf("failed to get public space repos,error:%w", err)
+			return nil, 0, newError
+		}
+
+		if len(repos) == 0 {
+			break
+		}
+
+		pageSpaces, err := c.convertReposToSpaces(ctx, repos)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		for _, space := range pageSpaces {
+			if space.Status == repoFilter.Status {
+				resSpaces = append(resSpaces, space)
+				if len(resSpaces) >= per {
+					break
+				}
+			}
+		}
+
+		if total <= currentPage*per {
+			break
+		}
+
+		currentPage++
+		pagesChecked++
+	}
+
+	if needOpWeight {
+		var repoIDs []int64
+		for _, s := range resSpaces {
+			repoIDs = append(repoIDs, s.RepositoryID)
+		}
+		c.addOpWeightToSpaces(ctx, repoIDs, resSpaces)
+	}
+
+	allRepos, allTotal, err := c.repoComponent.PublicToUser(ctx, types.SpaceRepo, repoFilter.Username, repoFilter, 0, 1)
+	if err != nil {
+		return resSpaces, len(resSpaces), nil
+	}
+	_ = allRepos
+
+	filteredTotal := 0
+	batchSize := 100
+	for offset := 0; offset < allTotal; offset += batchSize {
+		batchRepos, _, err := c.repoComponent.PublicToUser(ctx, types.SpaceRepo, repoFilter.Username, repoFilter, batchSize, offset/batchSize+1)
+		if err != nil {
+			break
+		}
+		if len(batchRepos) == 0 {
+			break
+		}
+
+		batchSpaces, err := c.convertReposToSpaces(ctx, batchRepos)
+		if err != nil {
+			break
+		}
+
+		for _, space := range batchSpaces {
+			if space.Status == repoFilter.Status {
+				filteredTotal++
+			}
+		}
+	}
+
+	return resSpaces, filteredTotal, nil
+}
+
+func (c *spaceComponentImpl) convertReposToSpaces(ctx context.Context, repos []*database.Repository) ([]*types.Space, error) {
+	var resSpaces []*types.Space
+
 	var repoIDs []int64
 	for _, repo := range repos {
 		repoIDs = append(repoIDs, repo.ID)
 	}
+
+	if len(repoIDs) == 0 {
+		return resSpaces, nil
+	}
+
 	spaces, err := c.spaceStore.ByRepoIDs(ctx, repoIDs)
 	if err != nil {
 		newError := fmt.Errorf("failed to get spaces by repo ids,error:%w", err)
-		return nil, 0, newError
+		return nil, newError
 	}
 
-	// loop through repos to keep the repos in sort order
 	for _, repo := range repos {
 		var space *database.Space
 		for _, s := range spaces {
@@ -554,6 +665,7 @@ func (c *spaceComponentImpl) Index(ctx context.Context, repoFilter *types.RepoFi
 			continue
 		}
 		spaceStatus, _ := c.status(ctx, space)
+
 		var tags []types.RepoTag
 		for _, tag := range space.Repository.Tags {
 			tags = append(tags, types.RepoTag{
@@ -561,7 +673,7 @@ func (c *spaceComponentImpl) Index(ctx context.Context, repoFilter *types.RepoFi
 				Category:  tag.Category,
 				Group:     tag.Group,
 				BuiltIn:   tag.BuiltIn,
-				ShowName:  tag.I18nKey, //ShowName:  tag.ShowName,
+				ShowName:  tag.I18nKey,
 				I18nKey:   tag.I18nKey,
 				CreatedAt: tag.CreatedAt,
 				UpdatedAt: tag.UpdatedAt,
@@ -595,10 +707,8 @@ func (c *spaceComponentImpl) Index(ctx context.Context, repoFilter *types.RepoFi
 			MinReplica: space.MinReplica,
 		})
 	}
-	if needOpWeight {
-		c.addOpWeightToSpaces(ctx, repoIDs, resSpaces)
-	}
-	return resSpaces, total, nil
+
+	return resSpaces, nil
 }
 
 func (c *spaceComponentImpl) OrgSpaces(ctx context.Context, req *types.OrgSpacesReq) ([]types.Space, int, error) {
@@ -884,6 +994,30 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		containerPort = types.MCPSERVER.Port
 	}
 
+	var imageID string
+	if space.Sdk != types.DOCKER.Name {
+		var frame *database.RuntimeFramework
+		var err error
+		if (space.Sdk == types.GRADIO.Name && space.SdkVersion != types.GRADIO.Version) ||
+			(space.Sdk == types.STREAMLIT.Name && space.SdkVersion != types.STREAMLIT.Version) {
+			// Using old base image 1.0.3 for old spaces, will be removed in the future
+			frame, err = c.rfs.FindByFrameNameAndDriverVersion(ctx, "space", "1.0.3", space.DriverVersion)
+			if err != nil {
+				return -1, fmt.Errorf("cannot find available (1.0.3) runtime framework, %w", err)
+			}
+		} else {
+			// 1.0.4
+			frame, err = c.rfs.FindByFrameNameAndDriverVersion(ctx, "space", "1.0.4", space.DriverVersion)
+			if err != nil {
+				return -1, fmt.Errorf("cannot find available (1.0.4) runtime framework, %w", err)
+			}
+		}
+
+		if frame != nil {
+			imageID = frame.FrameImage
+		}
+
+	}
 	// create deploy for space
 	dr := types.DeployRepo{
 		SpaceID:       space.ID,
@@ -900,7 +1034,7 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		ModelID:       0,
 		UserID:        user.ID,
 		Annotation:    string(annoStr),
-		ImageID:       "",
+		ImageID:       imageID,
 		Type:          types.SpaceType,
 		UserUUID:      user.UUID,
 		SKU:           space.SKU,
@@ -1126,7 +1260,7 @@ func (c *spaceComponentImpl) StatusByPaths(ctx context.Context, paths []string) 
 	return result, nil
 }
 
-func (c *spaceComponentImpl) Logs(ctx context.Context, namespace, name, since string) (*deploy.MultiLogReader, error) {
+func (c *spaceComponentImpl) Logs(ctx context.Context, namespace, name, since, instance string) (*deploy.MultiLogReader, error) {
 	s, err := c.spaceStore.FindByPath(ctx, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("can't find space for logs, error: %w", err)
@@ -1136,6 +1270,7 @@ func (c *spaceComponentImpl) Logs(ctx context.Context, namespace, name, since st
 		Namespace: namespace,
 		Name:      name,
 		Since:     since,
+		Instance:  instance,
 	})
 }
 
@@ -1202,6 +1337,29 @@ func (c *spaceComponentImpl) mergeUpdateSpaceRequest(ctx context.Context, space 
 		}
 		space.Hardware = resource.Resources
 		space.SKU = strconv.FormatInt(resource.ID, 10)
+
+		var hardware types.HardWare
+		err = json.Unmarshal([]byte(resource.Resources), &hardware)
+		if err != nil {
+			slog.ErrorContext(ctx, "invalid hardware setting", slog.Any("error", err))
+			return fmt.Errorf("invalid hardware setting, %w", err)
+		}
+		_, resourceType := deployCommon.GetResourceAndType(hardware)
+		if resourceType == "" { // only cpu resource
+			space.DriverVersion = ""
+		} else {
+			if req.DriverVersion == nil {
+				// set default value(compatible old version) latest cuda version by resocouurce type
+				frame, err := c.FindSpaceLatestCUDAVersion(ctx, resourceType)
+				if err != nil {
+					return fmt.Errorf("can't find latest cuda version for space resource, resource type:%s, error:%w", resourceType, err)
+				}
+
+				req.DriverVersion = &frame.DriverVersion
+			}
+			space.DriverVersion = *req.DriverVersion
+		}
+
 	}
 
 	if req.Variables != nil {
@@ -1331,6 +1489,54 @@ func (c *spaceComponentImpl) getEndpoint(svcName string, space *database.Space) 
 	}
 
 	return endpoint
+}
+
+// GetSupportedCUDAVersion returns the supported CUDA version based on the input resource type (cpu/gpu/npu, etc.)
+func (c *spaceComponentImpl) GetSupportedCUDAVersions(ctx context.Context, resourceType string) ([]string, error) {
+	frames, err := c.rfs.FindSpaceSupportedCUDAVersions(ctx, resourceType)
+	if err != nil {
+		return nil, err
+	}
+
+	var versions []string
+	for _, frame := range frames {
+		versions = append(versions, frame.DriverVersion)
+	}
+	return versions, nil
+}
+
+func (c *spaceComponentImpl) FindSpaceLatestCUDAVersion(ctx context.Context, computeType string) (*database.RuntimeFramework, error) {
+	frames, err := c.rfs.FindSpaceSupportedCUDAVersions(ctx, computeType)
+	if err != nil {
+		return nil, err
+	}
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("no supported cuda version found for compute type %s", computeType)
+	}
+
+	slices.SortFunc(frames, func(i, j database.RuntimeFramework) int {
+		if i.DriverVersion == "" {
+			return -1
+		}
+		if j.DriverVersion == "" {
+			return 1
+		}
+		iDriverVersion, jDriverVersion := i.DriverVersion, j.DriverVersion
+		// Pre-process: semver package requires version to start with "v", so we add it uniformly
+		if !strings.HasPrefix(iDriverVersion, "v") {
+			iDriverVersion = fmt.Sprintf("v%s", iDriverVersion)
+		}
+		if !strings.HasPrefix(jDriverVersion, "v") {
+			jDriverVersion = fmt.Sprintf("v%s", jDriverVersion)
+		}
+
+		// 1: a > b
+		// 0: a == b
+		// -1: a < b
+		return semver.Compare(iDriverVersion, jDriverVersion)
+	})
+
+	return &frames[len(frames)-1], nil
 }
 
 const (

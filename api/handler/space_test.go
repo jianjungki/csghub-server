@@ -96,6 +96,35 @@ func TestSpaceHandler_Index(t *testing.T) {
 
 }
 
+func TestSpaceHandler_Index_WithStatusFilter(t *testing.T) {
+	tester := NewSpaceTester(t).WithHandleFunc(func(h *SpaceHandler) gin.HandlerFunc {
+		return h.Index
+	})
+
+	tester.mocks.space.EXPECT().Index(tester.Ctx(), &types.RepoFilter{
+		Search:   "foo",
+		Sort:     "most_download",
+		Source:   "local",
+		SpaceSDK: "gradio",
+		Status:   "Running",
+	}, 10, 1, true).Return([]*types.Space{
+		{Name: "running-space", Status: "Running"},
+	}, 50, nil)
+
+	tester.AddPagination(1, 10).WithQuery("search", "foo").
+		WithQuery("sort", "most_download").
+		WithQuery("source", "local").
+		WithQuery("sdk", "gradio").
+		WithQuery("status", "Running").
+		WithQuery("need_op_weight", "true").Execute()
+
+	tester.ResponseEqSimple(t, 200, gin.H{
+		"data":  []types.Space{{Name: "running-space", Status: "Running"}},
+		"total": 50,
+		"msg":   "OK",
+	})
+}
+
 func TestSpaceHandler_Show(t *testing.T) {
 	tester := NewSpaceTester(t).WithHandleFunc(func(h *SpaceHandler) gin.HandlerFunc {
 		return h.Show
@@ -288,7 +317,7 @@ func TestSpaceHandler_Logs(t *testing.T) {
 	).Return(true, nil)
 	runlogChan := make(chan string)
 	tester.mocks.space.EXPECT().Logs(
-		mock.Anything, "u", "r", "",
+		mock.Anything, "u", "r", "", "",
 	).Return(deploy.NewMultiLogReader(nil, runlogChan), nil)
 	go func() {
 		runlogChan <- "foo"
