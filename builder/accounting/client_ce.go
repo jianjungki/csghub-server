@@ -22,6 +22,10 @@ func (ac *accountingClientImpl) ListBillsByUserIDAndDate(req types.ActStatements
 	return nil, nil
 }
 
+func (ac *accountingClientImpl) ListBillsDetailByUserID(req types.AcctBillsDetailReq) (any, error) {
+	return nil, nil
+}
+
 func (ac *accountingClientImpl) RechargeAccountingUser(userID string, req types.RechargeReq) (any, error) {
 	return nil, nil
 }
@@ -50,6 +54,10 @@ func (ac *accountingClientImpl) QueryPricesBySKUType(currentUser string, req typ
 	return nil, nil
 }
 
+func (ac *accountingClientImpl) QueryPricesBySkuTypeAndKinds(currentUser string, req types.AcctPriceListByKindsReq) (any, error) {
+	return nil, nil
+}
+
 func (ac *accountingClientImpl) GetPriceByID(currentUser string, id int64) (any, error) {
 	return nil, nil
 }
@@ -70,7 +78,7 @@ func (ac *accountingClientImpl) CreateOrder(currentUser string, req types.AcctOr
 	return nil, nil
 }
 
-func (ac *accountingClientImpl) ListRechargeByUserIDAndTime(req types.AcctRechargeListReq) (any, error) {
+func (ac *accountingClientImpl) ListRecharge(req types.AcctRechargeListReq) (any, error) {
 	return nil, nil
 }
 
@@ -79,5 +87,9 @@ func (ac *accountingClientImpl) ListRecharges(req types.RechargesIndexReq) (any,
 }
 
 func (ac *accountingClientImpl) StatementsIndex(req types.ActStatementsReq) (any, error) {
+	return nil, nil
+}
+
+func (ac *accountingClientImpl) ListPresents(req types.PresentsIndexReq) (any, error) {
 	return nil, nil
 }

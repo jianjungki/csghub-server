@@ -15,7 +15,6 @@ import (
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/i18n"
-	"opencsg.com/csghub-server/mq"
 )
 
 var launchCmd = &cobra.Command{
@@ -41,21 +40,19 @@ var launchCmd = &cobra.Command{
 			return fmt.Errorf("database initialization failed: %w", err)
 		}
 
-		mqHandler, err := mq.GetOrInit(cfg)
-		if err != nil {
-			return fmt.Errorf("fail to build message queue handler: %w", err)
-		}
-
 		mqFactory, err := bldmq.GetOrInitMessageQueueFactory(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to creating message queue factory: %w", err)
 		}
 
 		// Do metering
-		meter := consumer.NewMetering(mqHandler, cfg)
-		meter.Run()
+		metering, err := consumer.NewMetering(cfg, mqFactory)
+		if err != nil {
+			return fmt.Errorf("failed to create metering: %w", err)
+		}
+		metering.Run()
 
-		err = createAdvancedConsumer(cfg, mqHandler, mqFactory)
+		err = createAdvancedConsumer(cfg, mqFactory)
 		if err != nil {
 			return fmt.Errorf("failed to create advanced consumer: %w", err)
 		}
@@ -67,7 +64,7 @@ var launchCmd = &cobra.Command{
 			panic(err)
 		}
 
-		r, err := router.NewAccountRouter(cfg, mqHandler, mqFactory)
+		r, err := router.NewAccountRouter(cfg, mqFactory)
 		if err != nil {
 			return fmt.Errorf("failed to init router: %w", err)
 		}

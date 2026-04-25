@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 const (
 	// EngineArgEnableToolCalling is the engine argument for enabling tool calling
@@ -20,14 +24,15 @@ type DeployReq struct {
 }
 
 type ServiceEvent struct {
-	ServiceName string `json:"service_name"` // service name
-	Status      int    `json:"status"`       // event status
-	Endpoint    string `json:"endpoint"`     // service endpoint
-	Message     string `json:"message"`      // event message
-	Reason      string `json:"reason"`       // event reason
-	TaskID      int64  `json:"task_id"`      // task id
-	ClusterNode string `json:"cluster_node"` // cluster node name
-	QueueName   string `json:"queue_name"`   // queue name
+	ServiceName string     `json:"service_name"` // service name
+	Status      int        `json:"status"`       // event status
+	Endpoint    string     `json:"endpoint"`     // service endpoint
+	Message     string     `json:"message"`      // event message
+	Reason      string     `json:"reason"`       // event reason
+	TaskID      int64      `json:"task_id"`      // task id
+	ClusterNode string     `json:"cluster_node"` // cluster node name
+	QueueName   string     `json:"queue_name"`   // queue name
+	Instances   []Instance `json:"instances"`
 }
 
 type StatRunningDeploy struct {
@@ -39,4 +44,28 @@ type StatRunningDeploy struct {
 	MluNum    int `json:"mlu_num"`
 	DcuNum    int `json:"dcu_num"`
 	GPGpuNum  int `json:"gpgpu_num"`
+}
+
+type ClusterDeployReq struct {
+	ClusterID    string `json:"cluster_id"`
+	ClusterNode  string `json:"cluster_node"`
+	Status       int    `json:"status"`
+	ResourceID   int    `json:"resource_id"`
+	ResourceName string `json:"resource_name"`
+	Search       string `json:"search"`
+	Per          int    `json:"per"`
+	Page         int    `json:"page"`
+}
+
+// DeployExtend Use common fields for storage deployment to simplify the process of adding a large number
+// of repetitive fields to the request structure for each different scenario.
+type DeployExtend struct {
+	NodeAffinity *corev1.NodeAffinity `json:"node_affinity,omitempty"`
+	Tolerations  []Toleration         `json:"tolerations,omitempty"`
+}
+
+type DeployTimeRangeReq struct {
+	PageOpts
+	StartTime *time.Time `json:"start_time,omitempty"`
+	EndTime   *time.Time `json:"end_time,omitempty"`
 }

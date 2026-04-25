@@ -4,6 +4,8 @@ package component
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"opencsg.com/csghub-server/aigateway/types"
 	"opencsg.com/csghub-server/builder/event"
@@ -23,6 +25,9 @@ func NewOpenAIComponentFromConfig(config *config.Config) (OpenAIComponent, error
 	if err != nil {
 		return nil, err
 	}
+	if len(strings.TrimSpace(config.AIGateway.ModelIDFmt)) == 0 {
+		return nil, fmt.Errorf("modelIDFmt is empty")
+	}
 	return &openaiComponentImpl{
 		userStore:      database.NewUserStore(),
 		organStore:     database.NewOrgStore(),
@@ -31,9 +36,19 @@ func NewOpenAIComponentFromConfig(config *config.Config) (OpenAIComponent, error
 		extllmStore:    database.NewLLMConfigStore(config),
 		modelListCache: cacheClient,
 		extendOpenai:   extendOpenai{},
+		modelIDFmt:     config.AIGateway.ModelIDFmt,
+		modelIDBuilder: NewModelIDBuilder(),
 	}, nil
 }
 
 func (e *openaiComponentImpl) userPreference(ctx context.Context, req *types.UserPreferenceRequest) ([]types.Model, error) {
 	return req.Models, nil
+}
+
+func (e *extendOpenai) CheckBalance(ctx context.Context, username, userUUID string) error {
+	return nil
+}
+
+func (e *extendOpenai) enrichModelsWithPrice(_ context.Context, models []types.Model) []types.Model {
+	return models
 }

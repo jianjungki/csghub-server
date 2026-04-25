@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,15 +20,15 @@ import (
 	mockbuilder "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/deploy/imagebuilder"
 	mockrunner "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/deploy/imagerunner"
 	mockScheduler "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/deploy/scheduler"
-	mockmq "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/mq"
 	mockdb "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/builder/deploy/common"
-	"opencsg.com/csghub-server/builder/event"
 	"opencsg.com/csghub-server/builder/loki"
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/tests"
 	"opencsg.com/csghub-server/common/types"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 type testDepolyerWithMocks struct {
@@ -41,7 +43,7 @@ type testDepolyerWithMocks struct {
 }
 
 func TestDeployer_GenerateUniqueSvcName(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		Path: "namespace/name",
 	}
 
@@ -70,7 +72,7 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 		var oldDeploy database.Deploy
 		oldDeploy.ID = 1
 
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			SpaceID:          1,
 			Type:             types.SpaceType,
 			UserUUID:         "1",
@@ -85,6 +87,31 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 			Template:         "test template",
 			MinReplica:       1,
 			MaxReplica:       2,
+			DeployExtend: types.DeployExtend{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "foo",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"bar"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Tolerations: []types.Toleration{
+					{
+						Key:      "foo",
+						Operator: "Equal",
+						Value:    "bar",
+						Effect:   "NoSchedule",
+					},
+				},
+			},
 		}
 
 		newDeploy := oldDeploy
@@ -100,6 +127,8 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 		newDeploy.Template = dr.Template
 		newDeploy.MinReplica = dr.MinReplica
 		newDeploy.MaxReplica = dr.MaxReplica
+		newDeploy.NodeAffinity = dr.NodeAffinity
+		newDeploy.Tolerations = dr.Tolerations
 
 		mockTaskStore := mockdb.NewMockDeployTaskStore(t)
 		mockTaskStore.EXPECT().GetLatestDeployBySpaceID(mock.Anything, dr.SpaceID).Return(&oldDeploy, nil)
@@ -117,7 +146,7 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 		var oldDeploy database.Deploy
 		oldDeploy.ID = 1
 
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			RepoID:           1,
 			Type:             types.InferenceType,
 			UserUUID:         "1",
@@ -132,6 +161,31 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 			Template:         "test template",
 			MinReplica:       1,
 			MaxReplica:       2,
+			DeployExtend: types.DeployExtend{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "foo",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"bar"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Tolerations: []types.Toleration{
+					{
+						Key:      "foo",
+						Operator: "Equal",
+						Value:    "bar",
+						Effect:   "NoSchedule",
+					},
+				},
+			},
 		}
 
 		newDeploy := oldDeploy
@@ -147,6 +201,8 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 		newDeploy.Template = dr.Template
 		newDeploy.MinReplica = dr.MinReplica
 		newDeploy.MaxReplica = dr.MaxReplica
+		newDeploy.NodeAffinity = dr.NodeAffinity
+		newDeploy.Tolerations = dr.Tolerations
 
 		mockTaskStore := mockdb.NewMockDeployTaskStore(t)
 		mockTaskStore.EXPECT().GetServerlessDeployByRepID(mock.Anything, dr.RepoID).Return(&oldDeploy, nil)
@@ -162,7 +218,7 @@ func TestDeployer_serverlessDeploy(t *testing.T) {
 }
 
 func TestDeployer_dedicatedDeploy(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		Path: "namespace/name",
 		Type: types.InferenceType,
 	}
@@ -184,7 +240,7 @@ func TestDeployer_dedicatedDeploy(t *testing.T) {
 func TestDeployer_Deploy(t *testing.T) {
 	DeployWorkflow = func(buildTask, runTask *database.DeployTask) {}
 	t.Run("use on-demand resource and skip build task", func(t *testing.T) {
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			UserUUID: "1",
 			Path:     "namespace/name",
 			Type:     types.InferenceType,
@@ -232,7 +288,7 @@ func TestDeployer_Deploy(t *testing.T) {
 
 func TestDeployer_Status(t *testing.T) {
 	t.Run("no deploy", func(t *testing.T) {
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			UserUUID: "1",
 			Path:     "namespace/name",
 			Type:     types.InferenceType,
@@ -253,7 +309,7 @@ func TestDeployer_Status(t *testing.T) {
 
 	})
 	t.Run("cache miss and running", func(t *testing.T) {
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			DeployID:  1,
 			UserUUID:  "1",
 			Path:      "namespace/name",
@@ -261,11 +317,13 @@ func TestDeployer_Status(t *testing.T) {
 			ClusterID: "test",
 		}
 		deploy := &database.Deploy{
-			Status:  common.Building,
-			SvcName: "svc",
+			Status:    common.Building,
+			SvcName:   "svc",
+			ClusterID: "test",
+			Instances: nil,
 		}
 		mockClusterInfoStore := mockdb.NewMockClusterInfoStore(t)
-		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, mock.Anything).
+		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, "test").
 			Return(&types.ClusterRes{
 				Enable:         true,
 				LastUpdateTime: time.Now().Unix(),
@@ -273,23 +331,15 @@ func TestDeployer_Status(t *testing.T) {
 			}, nil)
 		cfg := config.Config{}
 		cfg.Runner.HearBeatIntervalInSec = 120
-		mockRunner := mockrunner.NewMockRunner(t)
 		mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
 		mockDeployTaskStore.EXPECT().GetDeployByID(mock.Anything, dr.DeployID).
 			Return(deploy, nil)
 
 		d := &deployer{
 			deployTaskStore: mockDeployTaskStore,
-			imageRunner:     mockRunner,
 			clusterStore:    mockClusterInfoStore,
 			config:          &cfg,
 		}
-		mockRunner.EXPECT().Exist(mock.Anything, mock.Anything).
-			Return(&types.StatusResponse{
-				DeployID: 1,
-				UserID:   "",
-				Code:     common.Stopped,
-			}, nil)
 
 		svcName, deployStatus, instances, err := d.Status(context.TODO(), dr, false)
 		require.Nil(t, err)
@@ -300,22 +350,24 @@ func TestDeployer_Status(t *testing.T) {
 	})
 
 	t.Run("cache miss and not running", func(t *testing.T) {
-		dr := types.DeployRepo{
-			DeployID: 1,
-			UserUUID: "1",
-			Path:     "namespace/name",
-			Type:     types.InferenceType,
+		dr := types.DeployRequest{
+			DeployID:  1,
+			UserUUID:  "1",
+			Path:      "namespace/name",
+			Type:      types.InferenceType,
+			ClusterID: "test",
 		}
 		deploy := &database.Deploy{
-			Status:  common.BuildSuccess,
-			SvcName: "svc",
+			Status:    common.BuildSuccess,
+			SvcName:   "svc",
+			ClusterID: "test",
+			Instances: nil,
 		}
-		mockRunner := mockrunner.NewMockRunner(t)
 		mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
 		mockDeployTaskStore.EXPECT().GetDeployByID(mock.Anything, dr.DeployID).
 			Return(deploy, nil)
 		mockClusterInfoStore := mockdb.NewMockClusterInfoStore(t)
-		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, mock.Anything).
+		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, "test").
 			Return(&types.ClusterRes{
 				Enable:         true,
 				LastUpdateTime: time.Now().Unix(),
@@ -325,17 +377,9 @@ func TestDeployer_Status(t *testing.T) {
 		cfg.Runner.HearBeatIntervalInSec = 120
 		d := &deployer{
 			deployTaskStore: mockDeployTaskStore,
-			imageRunner:     mockRunner,
 			clusterStore:    mockClusterInfoStore,
 			config:          &cfg,
 		}
-
-		mockRunner.EXPECT().Exist(mock.Anything, mock.Anything).
-			Return(&types.StatusResponse{
-				DeployID: 1,
-				UserID:   "",
-				Code:     int(common.BuildSuccess),
-			}, nil)
 
 		svcName, deployStatus, instances, err := d.Status(context.TODO(), dr, false)
 		require.Nil(t, err)
@@ -346,21 +390,26 @@ func TestDeployer_Status(t *testing.T) {
 	})
 
 	t.Run("cache hit and running", func(t *testing.T) {
-		dr := types.DeployRepo{
-			DeployID: 1,
-			UserUUID: "1",
-			Path:     "namespace/name",
-			Type:     types.InferenceType,
-			ModelID:  1,
+		dr := types.DeployRequest{
+			DeployID:  1,
+			UserUUID:  "1",
+			Path:      "namespace/name",
+			Type:      types.InferenceType,
+			ModelID:   1,
+			ClusterID: "test",
 		}
 		// build success status in db
 		deploy := &database.Deploy{
-			Status:  common.BuildSuccess,
-			SvcName: "svc",
+			Status:    common.BuildSuccess,
+			SvcName:   "svc",
+			ClusterID: "test",
+			Instances: []types.Instance{{
+				Name: "instance1",
+			}},
 		}
 
 		mockClusterInfoStore := mockdb.NewMockClusterInfoStore(t)
-		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, mock.Anything).
+		mockClusterInfoStore.EXPECT().GetClusterResources(mock.Anything, "test").
 			Return(&types.ClusterRes{
 				Enable:         true,
 				LastUpdateTime: time.Now().Unix(),
@@ -370,30 +419,18 @@ func TestDeployer_Status(t *testing.T) {
 		mockDeployTaskStore.EXPECT().GetDeployByID(mock.Anything, dr.DeployID).
 			Return(deploy, nil)
 
-		mockRunner := mockrunner.NewMockRunner(t)
-
 		cfg := config.Config{}
 		cfg.Runner.HearBeatIntervalInSec = 120
 		d := &deployer{
 			deployTaskStore: mockDeployTaskStore,
-			imageRunner:     mockRunner,
 			clusterStore:    mockClusterInfoStore,
 			config:          &cfg,
 		}
-		mockRunner.EXPECT().Exist(mock.Anything, mock.Anything).
-			Return(&types.StatusResponse{
-				DeployID: 1,
-				UserID:   "",
-				Code:     common.Running,
-				Instances: []types.Instance{{
-					Name: "instance1",
-				}},
-			}, nil)
 
 		svcName, deployStatus, instances, err := d.Status(context.TODO(), dr, false)
 		require.Nil(t, err)
 		require.Equal(t, "svc", svcName)
-		require.Equal(t, common.Running, deployStatus)
+		require.Equal(t, common.BuildSuccess, deployStatus)
 		require.Len(t, instances, 1)
 
 	})
@@ -401,7 +438,7 @@ func TestDeployer_Status(t *testing.T) {
 
 func TestDeployer_Logs(t *testing.T) {
 	t.Run("no deploy", func(t *testing.T) {
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			UserUUID: "1",
 			Path:     "namespace/name",
 			Type:     types.InferenceType,
@@ -422,7 +459,7 @@ func TestDeployer_Logs(t *testing.T) {
 
 	})
 	t.Run("get log reader", func(t *testing.T) {
-		dr := types.DeployRepo{
+		dr := types.DeployRequest{
 			SpaceID:  1,
 			DeployID: 1,
 			UserUUID: "1",
@@ -475,7 +512,7 @@ func TestDeployer_Logs(t *testing.T) {
 }
 
 func TestDeployer_Purge(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:  0,
 		DeployID: 1,
 		UserUUID: "1",
@@ -494,7 +531,7 @@ func TestDeployer_Purge(t *testing.T) {
 }
 
 func TestDeployer_Exists(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:  0,
 		DeployID: 1,
 		UserUUID: "1",
@@ -548,7 +585,7 @@ func TestDeployer_Exists(t *testing.T) {
 }
 
 func TestDeployer_GetReplica(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:  0,
 		DeployID: 1,
 		UserUUID: "1",
@@ -600,7 +637,7 @@ func TestDeployer_GetReplica(t *testing.T) {
 }
 
 func TestDeployer_InstanceLogs(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:   0,
 		DeployID:  1,
 		UserUUID:  "1",
@@ -723,25 +760,10 @@ func TestDeployer_UpdateDeploy(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestDeployer_getResourceMap(t *testing.T) {
-	mockSpaceResourceStore := mockdb.NewMockSpaceResourceStore(t)
-	mockSpaceResourceStore.EXPECT().FindAll(mock.Anything).
-		Return([]database.SpaceResource{
-			{ID: 1, Name: "Resource1"},
-			{ID: 2, Name: "Resource2"},
-		}, nil)
-
-	d := &deployer{
-		spaceResourceStore: mockSpaceResourceStore,
-	}
-	resources := d.getResourceMap()
-	require.Equal(t, map[string]string{
-		"1": "Resource1",
-		"2": "Resource2",
-	}, resources)
-}
-
 func TestDeployer_CheckResource(t *testing.T) {
+	config := &config.Config{}
+	config.Runner.VGPUResourceReqKey = "nvidia.com/vgpu"
+	config.Runner.VGPUMemoryReqKey = "nvidia.com/vgpumem"
 
 	cases := []struct {
 		hardware  *types.HardWare
@@ -772,7 +794,7 @@ func TestDeployer_CheckResource(t *testing.T) {
 
 	for _, c := range cases {
 		c.hardware.Memory = "1Gi"
-		v := CheckResource(&types.ClusterRes{
+		v, _ := CheckResource(&types.ClusterRes{
 			Resources: []types.NodeResourceInfo{
 				{
 					NodeHardware: types.NodeHardware{
@@ -785,7 +807,7 @@ func TestDeployer_CheckResource(t *testing.T) {
 					},
 				},
 			},
-		}, c.hardware)
+		}, c.hardware, config)
 		require.Equal(t, c.available, v, c.hardware)
 	}
 
@@ -832,30 +854,134 @@ func TestDeployer_GetEvaluation(t *testing.T) {
 	require.Equal(t, &types.ArgoWorkFlowRes{ID: 100}, r)
 }
 
-func TestDeployer_getClusterMap(t *testing.T) {
-	clusterStore := mockdb.NewMockClusterInfoStore(t)
-	clusterStore.EXPECT().List(mock.Anything).Return([]database.ClusterInfo{
-		{
-			ClusterID: "cluster1",
+func TestDeployer_SubmitFinetune(t *testing.T) {
+	tester := newTestDeployer(t)
+	ctx := context.TODO()
+
+	tester.mocks.runner.EXPECT().SubmitFinetuneJob(ctx, mock.Anything).RunAndReturn(
+		func(ctx context.Context, awfr *types.ArgoWorkFlowReq) (*types.ArgoWorkFlowRes, error) {
+			require.Equal(t, map[string]string{
+				"MODEL_ID":                "m1",
+				"ACCESS_TOKEN":            "k",
+				"DATASET_ID":              "",
+				"HF_ENDPOINT":             "dl/hf",
+				"HF_HUB_DOWNLOAD_TIMEOUT": "30",
+				"HF_TOKEN":                "k",
+				"HF_USERNAME":             "",
+				"LEARNING_RATE":           "0",
+				"CUSTOM_ARGS":             "",
+				"EPOCHS":                  "0",
+				"REVISION":               "",
+				"DATASET_REVISION":        "",
+			}, awfr.Templates[0].Env)
+			return &types.ArgoWorkFlowRes{ID: 1}, nil
 		},
+	)
+
+	tester.mocks.stores.ClusterInfoMock().EXPECT().FindNodeByClusterID(ctx, "").Return([]database.ClusterNode{
 		{
-			ClusterID: "cluster2",
+			Name: "node1",
 		},
 	}, nil)
 
-	d := &deployer{
-		clusterStore: clusterStore,
+	resp, err := tester.SubmitFinetuneJob(ctx, types.FinetuneReq{
+		ModelId:          "m1",
+		Token:            "k",
+		DownloadEndpoint: "dl",
+	})
+	require.NoError(t, err)
+	require.Equal(t, &types.ArgoWorkFlowRes{ID: 1}, resp)
+}
+
+func TestDeployer_DeleteFinetune(t *testing.T) {
+	tester := newTestDeployer(t)
+	ctx := context.TODO()
+
+	tester.mocks.runner.EXPECT().DeleteWorkFlow(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	}).Return(nil, nil)
+
+	err := tester.DeleteFinetuneJob(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	})
+	require.NoError(t, err)
+}
+
+func TestDeployer_DeleteEvaluation(t *testing.T) {
+	tester := newTestDeployer(t)
+	ctx := context.TODO()
+
+	tester.mocks.runner.EXPECT().DeleteWorkFlow(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	}).Return(nil, nil)
+
+	err := tester.DeleteEvaluation(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	})
+	require.NoError(t, err)
+}
+
+func TestDeployer_DeleteEvaluation_Error(t *testing.T) {
+	tester := newTestDeployer(t)
+	ctx := context.TODO()
+
+	tester.mocks.runner.EXPECT().DeleteWorkFlow(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	}).Return(nil, errors.New("delete workflow failed"))
+
+	err := tester.DeleteEvaluation(ctx, types.ArgoWorkFlowDeleteReq{
+		ID: 1,
+	})
+	require.Error(t, err)
+	require.Equal(t, "delete workflow failed", err.Error())
+}
+
+func TestDeployer_GetWorkflowLogsInStream(t *testing.T) {
+	now := time.Now()
+	req := types.FinetuneLogReq{
+		CurrentUser: "test-user",
+		PodName:     "pod1",
+		SubmitTime:  now,
 	}
 
-	res := d.getClusterMap()
-	require.Equal(t, map[string]database.ClusterInfo{
-		"cluster1": {
-			ClusterID: "cluster1",
-		},
-		"cluster2": {
-			ClusterID: "cluster2",
-		},
-	}, res)
+	mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
+
+	sender := mockSender.NewMockLogSender(t)
+
+	ch := make(chan string)
+	sender.EXPECT().StreamAllLogs(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(ch, nil)
+	d := &deployer{
+		deployTaskStore: mockDeployTaskStore,
+		lokiClient:      sender,
+	}
+	lreader, err := d.GetWorkflowLogsInStream(context.TODO(), req)
+	require.Nil(t, err)
+	require.Nil(t, lreader.buildLogs)
+	require.NotNil(t, lreader.RunLog())
+}
+
+func TestDeployer_GetWorkflowLogsNonStream(t *testing.T) {
+	now := time.Now()
+	req := types.FinetuneLogReq{
+		CurrentUser: "test-user",
+		PodName:     "pod1",
+		SubmitTime:  now,
+	}
+
+	mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
+
+	sender := mockSender.NewMockLogSender(t)
+
+	sender.EXPECT().GenerateLabelQuery(mock.Anything).Return("test_query")
+	sender.EXPECT().QueryRange(mock.Anything, mock.Anything).Return(&loki.LokiQueryResponse{}, nil)
+
+	d := &deployer{
+		deployTaskStore: mockDeployTaskStore,
+		lokiClient:      sender,
+	}
+	resp, err := d.GetWorkflowLogsNonStream(context.TODO(), req)
+	require.Nil(t, err)
+	require.NotNil(t, resp)
 }
 
 func TestDeployer_CheckHeartbeatTimeout(t *testing.T) {
@@ -932,455 +1058,188 @@ func TestDeployer_CheckHeartbeatTimeout(t *testing.T) {
 	})
 }
 
-func TestDeployer_SubmitFinetune(t *testing.T) {
-	tester := newTestDeployer(t)
-	ctx := context.TODO()
-
-	tester.mocks.runner.EXPECT().SubmitFinetuneJob(ctx, mock.Anything).RunAndReturn(
-		func(ctx context.Context, awfr *types.ArgoWorkFlowReq) (*types.ArgoWorkFlowRes, error) {
-			require.Equal(t, map[string]string{
-				"MODEL_ID":                "m1",
-				"ACCESS_TOKEN":            "k",
-				"DATASET_ID":              "",
-				"HF_ENDPOINT":             "dl/hf",
-				"HF_HUB_DOWNLOAD_TIMEOUT": "30",
-				"HF_TOKEN":                "k",
-				"HF_USERNAME":             "",
-				"LEARNING_RATE":           "0",
-				"CUSTOM_ARGS":             "",
-				"EPOCHS":                  "0",
-			}, awfr.Templates[0].Env)
-			return &types.ArgoWorkFlowRes{ID: 1}, nil
-		},
-	)
-
-	tester.mocks.stores.ClusterInfoMock().EXPECT().FindNodeByClusterID(ctx, "").Return([]database.ClusterNode{
-		{
-			Name: "node1",
-		},
-	}, nil)
-
-	resp, err := tester.SubmitFinetuneJob(ctx, types.FinetuneReq{
-		ModelId:          "m1",
-		Token:            "k",
-		DownloadEndpoint: "dl",
+func TestDeployer_IsDefaultScheduler(t *testing.T) {
+	t.Run("default scheduler", func(t *testing.T) {
+		d := &deployer{
+			kubeScheduler: nil,
+		}
+		require.True(t, d.IsDefaultScheduler())
 	})
-	require.NoError(t, err)
-	require.Equal(t, &types.ArgoWorkFlowRes{ID: 1}, resp)
+
+	t.Run("custom scheduler", func(t *testing.T) {
+		d := &deployer{
+			kubeScheduler: &types.Scheduler{},
+		}
+		require.False(t, d.IsDefaultScheduler())
+	})
 }
 
-func TestDeployer_DeleteFinetune(t *testing.T) {
-	tester := newTestDeployer(t)
-	ctx := context.TODO()
+func TestDeployer_GetSharedModeResourceName(t *testing.T) {
+	config := &config.Config{}
+	config.Runner.VGPUResourceReqKey = "nvidia.com/vgpu"
 
-	tester.mocks.runner.EXPECT().DeleteWorkFlow(ctx, types.ArgoWorkFlowDeleteReq{
-		ID: 1,
-	}).Return(nil, nil)
-
-	err := tester.DeleteFinetuneJob(ctx, types.ArgoWorkFlowDeleteReq{
-		ID: 1,
+	t.Run("default scheduler", func(t *testing.T) {
+		d := &deployer{
+			kubeScheduler: nil,
+		}
+		name := d.GetSharedModeResourceName(config)
+		require.Equal(t, common.DefaultResourceName, name)
 	})
-	require.NoError(t, err)
+
+	t.Run("custom scheduler", func(t *testing.T) {
+		d := &deployer{
+			kubeScheduler: &types.Scheduler{},
+		}
+		name := d.GetSharedModeResourceName(config)
+		require.Equal(t, "nvidia.com/vgpu", name)
+	})
 }
 
-func TestDeployer_GetWorkflowLogsInStream(t *testing.T) {
-	now := time.Now()
-	req := types.FinetuneLogReq{
-		CurrentUser: "test-user",
-		PodName:     "pod1",
-		SubmitTime:  now,
-	}
+func TestDeployer_Wakeup(t *testing.T) {
+	ctx := context.Background()
 
-	mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
+	t.Run("cluster with app endpoint uses app endpoint", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
 
-	sender := mockSender.NewMockLogSender(t)
-
-	ch := make(chan string)
-	sender.EXPECT().StreamAllLogs(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(ch, nil)
-	d := &deployer{
-		deployTaskStore: mockDeployTaskStore,
-		lokiClient:      sender,
-	}
-	lreader, err := d.GetWorkflowLogsInStream(context.TODO(), req)
-	require.Nil(t, err)
-	require.Nil(t, lreader.buildLogs)
-	require.NotNil(t, lreader.RunLog())
-}
-
-func TestDeployer_GetWorkflowLogsNonStream(t *testing.T) {
-	now := time.Now()
-	req := types.FinetuneLogReq{
-		CurrentUser: "test-user",
-		PodName:     "pod1",
-		SubmitTime:  now,
-	}
-
-	mockDeployTaskStore := mockdb.NewMockDeployTaskStore(t)
-
-	sender := mockSender.NewMockLogSender(t)
-
-	sender.EXPECT().QueryRange(mock.Anything, mock.Anything).Return(&loki.LokiQueryResponse{}, nil)
-
-	d := &deployer{
-		deployTaskStore: mockDeployTaskStore,
-		lokiClient:      sender,
-	}
-	resp, err := d.GetWorkflowLogsNonStream(context.TODO(), req)
-	require.Nil(t, err)
-	require.NotNil(t, resp)
-}
-
-func TestDeployer_startAcctMeteringRequest(t *testing.T) {
-	now := time.Now()
-	eventTime := now
-
-	t.Run("skip when cluster does not exist", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		clusterMap := map[string]database.ClusterInfo{}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when cluster is not running", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": {
-				ClusterID: "cluster1",
-				Status:    types.ClusterStatusUnavailable,
-			},
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when cluster heartbeat timeout", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now.Add(-30 * time.Minute) // Very old update
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-		}
+		mockClusterStore := mockdb.NewMockClusterInfoStore(t)
+		mockClusterStore.EXPECT().ByClusterID(ctx, "cluster-1").Return(database.ClusterInfo{
+			ClusterID:   "cluster-1",
+			AppEndpoint: ts.URL,
+		}, nil)
 
 		d := &deployer{
-			deployConfig: common.DeployConfig{
-				HeartBeatTimeInSec: 300, // 5 minutes
-			},
-		}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when deploy has no SKU", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "", // Empty SKU
-			Type:      types.InferenceType,
+			internalRootDomain: "svc.cluster.local",
+			clusterStore:       mockClusterStore,
 		}
 
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when SKU not found in resMap", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "unknown_sku",
-			Type:      types.InferenceType,
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when invalid deploy type", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      -1, // Invalid type
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when ModelServerless scene", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		hardwareJSON := `{"replicas":1}`
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.ServerlessType,
-			Hardware:  hardwareJSON,
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("skip when hardware format is invalid", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-			Hardware:  "invalid json",
-		}
-
-		d := &deployer{}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should return early without error
-	})
-
-	t.Run("success with single node deploy and replica count", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		hardwareJSON := `{"replicas":1}`
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-			Hardware:  hardwareJSON,
+		dr := types.DeployRequest{
+			SpaceID:   1,
+			Namespace: "test",
+			Name:      "space",
 			SvcName:   "test-svc",
-			SpaceID:   0,
-			UserUUID:  "user1",
+			ClusterID: "cluster-1",
+			Endpoint:  "http://test-svc.app.opencsg.com",
 		}
 
-		mockRunner := mockrunner.NewMockRunner(t)
-		mockRunner.EXPECT().GetReplica(mock.Anything, mock.Anything).
-			Return(&types.ReplicaResponse{
-				ActualReplica:  3,
-				DesiredReplica: 3,
-			}, nil)
-
-		mockMQ := mockmq.NewMockMessageQueue(t)
-		mockMQ.EXPECT().Publish(mock.Anything, mock.Anything).Return(nil)
-
-		d := &deployer{
-			imageRunner: mockRunner,
-			eventPub: &event.EventPublisher{
-				SyncInterval: 5, // 5 minutes
-				MQ:           mockMQ,
-			},
-			deployConfig: common.DeployConfig{
-				HeartBeatTimeInSec: 300,
-				UniqueServiceName:  "test-service",
-			},
-		}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should complete without error
+		err := d.Wakeup(ctx, dr)
+		require.NoError(t, err)
 	})
 
-	t.Run("success with multi-node deploy (replicas >= 2)", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		hardwareJSON := `{"replicas":2}`
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-			Hardware:  hardwareJSON,
-			SvcName:   "test-svc",
-			UserUUID:  "user1",
-		}
-
-		mockMQ := mockmq.NewMockMessageQueue(t)
-		mockMQ.EXPECT().Publish(mock.Anything, mock.Anything).Return(nil)
+	t.Run("failed to get cluster returns error", func(t *testing.T) {
+		mockClusterStore := mockdb.NewMockClusterInfoStore(t)
+		mockClusterStore.EXPECT().ByClusterID(ctx, "cluster-1").Return(database.ClusterInfo{}, errors.New("cluster not found"))
 
 		d := &deployer{
-			eventPub: &event.EventPublisher{
-				SyncInterval: 5,
-				MQ:           mockMQ,
-			},
-			deployConfig: common.DeployConfig{
-				HeartBeatTimeInSec: 300,
-				UniqueServiceName:  "test-service",
-			},
+			internalRootDomain: "svc.cluster.local",
+			clusterStore:       mockClusterStore,
 		}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should complete without calling GetReplica
+
+		dr := types.DeployRequest{
+			SpaceID:   1,
+			Namespace: "test",
+			Name:      "space",
+			SvcName:   "test-svc",
+			ClusterID: "cluster-1",
+		}
+
+		err := d.Wakeup(ctx, dr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cluster not found")
 	})
 
-	t.Run("success with GetReplica returning multiple replicas", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		hardwareJSON := `{"replicas":1}`
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-			Hardware:  hardwareJSON,
-			SvcName:   "test-svc",
-			SpaceID:   0,
-			UserUUID:  "user1",
-		}
+	t.Run("http request timeout returns nil", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(10 * time.Second)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
 
-		mockRunner := mockrunner.NewMockRunner(t)
-		mockRunner.EXPECT().GetReplica(mock.Anything, mock.Anything).
-			Return(&types.ReplicaResponse{
-				ActualReplica:  2,
-				DesiredReplica: 2,
-			}, nil)
-
-		mockMQ := mockmq.NewMockMessageQueue(t)
-		mockMQ.EXPECT().Publish(mock.Anything, mock.Anything).Return(nil)
+		mockClusterStore := mockdb.NewMockClusterInfoStore(t)
+		mockClusterStore.EXPECT().ByClusterID(ctx, "cluster-1").Return(database.ClusterInfo{
+			ClusterID:   "cluster-1",
+			AppEndpoint: ts.URL,
+		}, nil)
 
 		d := &deployer{
-			imageRunner: mockRunner,
-			eventPub: &event.EventPublisher{
-				SyncInterval: 5,
-				MQ:           mockMQ,
-			},
-			deployConfig: common.DeployConfig{
-				HeartBeatTimeInSec: 300,
-				UniqueServiceName:  "test-service",
-			},
+			internalRootDomain: "svc.cluster.local",
+			clusterStore:       mockClusterStore,
 		}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should complete without error
+
+		dr := types.DeployRequest{
+			SpaceID:   1,
+			Namespace: "test",
+			Name:      "space",
+			SvcName:   "test-svc",
+			ClusterID: "cluster-1",
+			Endpoint:  "http://test-svc.app.opencsg.com",
+		}
+
+		err := d.Wakeup(ctx, dr)
+		require.NoError(t, err)
 	})
 
-	t.Run("handle GetReplica error gracefully", func(t *testing.T) {
-		resMap := map[string]string{"sku1": "resource1"}
-		cluster := database.ClusterInfo{
-			ClusterID: "cluster1",
-			Status:    types.ClusterStatusRunning,
-		}
-		cluster.UpdatedAt = now
-		clusterMap := map[string]database.ClusterInfo{
-			"cluster1": cluster,
-		}
-		hardwareJSON := `{"replicas":1}`
-		deploy := database.Deploy{
-			ID:        1,
-			ClusterID: "cluster1",
-			SKU:       "sku1",
-			Type:      types.InferenceType,
-			Hardware:  hardwareJSON,
-			SvcName:   "test-svc",
-			SpaceID:   0,
-			UserUUID:  "user1",
-		}
+	t.Run("http request error is handled asynchronously", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		}))
+		defer ts.Close()
 
-		mockRunner := mockrunner.NewMockRunner(t)
-		mockRunner.EXPECT().GetReplica(mock.Anything, mock.Anything).
-			Return(nil, errors.New("replica error"))
-
-		mockMQ := mockmq.NewMockMessageQueue(t)
-		mockMQ.EXPECT().Publish(mock.Anything, mock.Anything).Return(nil)
+		mockClusterStore := mockdb.NewMockClusterInfoStore(t)
+		mockClusterStore.EXPECT().ByClusterID(ctx, "cluster-1").Return(database.ClusterInfo{
+			ClusterID:   "cluster-1",
+			AppEndpoint: ts.URL,
+		}, nil)
 
 		d := &deployer{
-			imageRunner: mockRunner,
-			eventPub: &event.EventPublisher{
-				SyncInterval: 5,
-				MQ:           mockMQ,
-			},
-			deployConfig: common.DeployConfig{
-				HeartBeatTimeInSec: 300,
-				UniqueServiceName:  "test-service",
-			},
+			internalRootDomain: "svc.cluster.local",
+			clusterStore:       mockClusterStore,
 		}
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-		// Should use default replicaCount of 1
+
+		dr := types.DeployRequest{
+			SpaceID:   1,
+			Namespace: "test",
+			Name:      "space",
+			SvcName:   "test-svc",
+			ClusterID: "cluster-1",
+			Endpoint:  "http://test-svc.app.opencsg.com",
+		}
+
+		err := d.Wakeup(ctx, dr)
+		require.NoError(t, err)
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("http status not found is handled asynchronously", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer ts.Close()
+
+		mockClusterStore := mockdb.NewMockClusterInfoStore(t)
+		mockClusterStore.EXPECT().ByClusterID(ctx, "cluster-1").Return(database.ClusterInfo{
+			ClusterID:   "cluster-1",
+			AppEndpoint: ts.URL,
+		}, nil)
+
+		d := &deployer{
+			internalRootDomain: "svc.cluster.local",
+			clusterStore:       mockClusterStore,
+		}
+
+		dr := types.DeployRequest{
+			SpaceID:   1,
+			Namespace: "test",
+			Name:      "space",
+			SvcName:   "test-svc",
+			ClusterID: "cluster-1",
+			Endpoint:  "http://test-svc.app.opencsg.com",
+		}
+
+		err := d.Wakeup(ctx, dr)
+		require.NoError(t, err)
+		time.Sleep(100 * time.Millisecond)
 	})
 }

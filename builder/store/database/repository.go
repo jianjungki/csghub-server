@@ -96,6 +96,8 @@ type RepoStore interface {
 	FindUnhashedRepos(ctx context.Context, batchSize int, lastID int64) ([]Repository, error)
 	UpdateRepoSensitiveCheckStatus(ctx context.Context, repoID int64, status types.SensitiveCheckStatus) error
 	GetReposBySearch(ctx context.Context, search string, repoType types.RepositoryType, page, pageSize int) ([]*Repository, int, error)
+	// GetRepositoriesWithoutStatistics returns repositories without associated RepositoryStatistics
+	GetRepositoriesWithoutStatistics(ctx context.Context, limit, offset int) ([]*Repository, error)
 }
 
 func (s *repoStoreImpl) UpdateRepoSensitiveCheckStatus(ctx context.Context, repoID int64, status types.SensitiveCheckStatus) error {
@@ -177,11 +179,12 @@ type Repository struct {
 	Tags                       []Tag                      `bun:"m2m:repository_tags,join:Repository=Tag" json:"tags"`
 	Metadata                   Metadata                   `bun:"rel:has-one,join:id=repository_id" json:"metadata"`
 	Mirror                     Mirror                     `bun:"rel:has-one,join:id=repository_id" json:"mirror"`
+	Statistics                 []RepositoryStatistics     `bun:"rel:has-many,join:id=repository_id" json:"statistics"`
 	RepositoryType             types.RepositoryType       `bun:",notnull" json:"repository_type"`
 	HTTPCloneURL               string                     `bun:",nullzero" json:"http_clone_url"`
 	SSHCloneURL                string                     `bun:",nullzero" json:"ssh_clone_url"`
 	Source                     types.RepositorySource     `bun:",nullzero,default:'local'" json:"source"`
-	SyncStatus                 types.RepositorySyncStatus `bun:",nullzero" json:"sync_status"` // Only used for multi-source sync status // Only used for multi-source sync status
+	SyncStatus                 types.RepositorySyncStatus `bun:",nullzero" json:"sync_status"` // Only used for multi-source sync status
 	SensitiveCheckStatus       types.SensitiveCheckStatus `bun:",default:0" json:"sensitive_check_status"`
 	MSPath                     string                     `bun:",nullzero" json:"ms_path"`
 	CSGPath                    string                     `bun:",nullzero" json:"csg_path"`
@@ -662,6 +665,10 @@ func (s *repoStoreImpl) SetUpdateTimeByPath(ctx context.Context, repoType types.
 }
 
 func (s *repoStoreImpl) PublicToUser(ctx context.Context, repoType types.RepositoryType, userIDs []int64, filter *types.RepoFilter, per, page int, isAdmin bool) (repos []*Repository, count int, err error) {
+	if filter.Sort == "trending" && strings.TrimSpace(filter.Search) == "" {
+		return s.publicToUserTrending(ctx, repoType, userIDs, filter, per, page, isAdmin)
+	}
+
 	q := s.db.Operator.Core.
 		NewSelect().
 		Column("repository.*").
@@ -670,20 +677,21 @@ func (s *repoStoreImpl) PublicToUser(ctx context.Context, repoType types.Reposit
 
 	q.Where("repository.repository_type = ?", repoType)
 
-	// join table by repo type to filter out deleted and half-created records
 	switch repoType {
 	case types.ModelRepo:
-		q.Join("LEFT JOIN models ON models.repository_id = repository.id")
+		q.Join("INNER JOIN models ON models.repository_id = repository.id")
 	case types.DatasetRepo:
-		q.Join("LEFT JOIN datasets ON datasets.repository_id = repository.id")
+		q.Join("INNER JOIN datasets ON datasets.repository_id = repository.id")
 	case types.CodeRepo:
-		q.Join("LEFT JOIN codes ON codes.repository_id = repository.id")
+		q.Join("INNER JOIN codes ON codes.repository_id = repository.id")
 	case types.SpaceRepo:
-		q.Join("LEFT JOIN spaces ON spaces.repository_id = repository.id")
+		q.Join("INNER JOIN spaces ON spaces.repository_id = repository.id")
 	case types.PromptRepo:
-		q.Join("LEFT JOIN prompts ON prompts.repository_id = repository.id")
+		q.Join("INNER JOIN prompts ON prompts.repository_id = repository.id")
 	case types.MCPServerRepo:
-		q.Join("LEFT JOIN mcp_servers ON mcp_servers.repository_id = repository.id")
+		q.Join("INNER JOIN mcp_servers ON mcp_servers.repository_id = repository.id")
+	case types.SkillRepo:
+		q.Join("INNER JOIN skills ON skills.repository_id = repository.id")
 	}
 
 	if !isAdmin {
@@ -697,31 +705,67 @@ func (s *repoStoreImpl) PublicToUser(ctx context.Context, repoType types.Reposit
 	needDistinct := false
 	if filter.Source != "" {
 		if filter.Source == "local" {
-			q.Join("LEFT JOIN mirrors ON mirrors.repository_id = repository.id").
-				Join("LEFT JOIN mirror_tasks ON mirror_tasks.mirror_id = mirrors.id").
-				Where("mirror_tasks.status = ? or repository.source = ?", types.MirrorLfsSyncFinished, "local")
-			needDistinct = true
+			q.Where(`(
+				repository.source = 'local'
+				OR EXISTS (
+					SELECT 1 FROM mirrors m
+					JOIN mirror_tasks mt ON mt.mirror_id = m.id
+					WHERE m.repository_id = repository.id
+					  AND mt.status = ?
+				)
+			)`, types.MirrorLfsSyncFinished)
 		} else {
 			q.Where("repository.source = ?", filter.Source)
 		}
 	}
+
 	if filter.XnetMigrationStatus != nil {
 		q.Join("LEFT JOIN xnet_migration_tasks ON xnet_migration_tasks.id = repository.current_xnet_migration_task_id").
 			Where("xnet_migration_tasks.status = ?", *filter.XnetMigrationStatus)
 		needDistinct = true
 	}
 
-	// model tree filter
 	if filter.Tree != nil {
 		q.Where("repository.id IN (SELECT target_repo_id FROM model_trees WHERE source_repo_id = ? and relation = ?)", filter.Tree.RepoId, filter.Tree.Relation)
 	}
-	// list serverless
+
 	if filter.ListServerless {
 		q.Where("repository.id IN (SELECT repo_id FROM deploys WHERE type = ? and status = ?)", types.ServerlessType, common.Running)
 	}
 
 	if len(filter.SpaceSDK) > 0 {
-		q.Where("spaces.sdk = ?", filter.SpaceSDK)
+		q.Where("EXISTS (SELECT 1 FROM spaces s WHERE s.repository_id = repository.id AND s.sdk = ?)", filter.SpaceSDK)
+	}
+
+	// Filter by dataset type for dataset repo
+	if repoType == types.DatasetRepo && filter.DatasetType != "" {
+		q.Where("datasets.dataset_type = ?", filter.DatasetType)
+	}
+
+	// Filter by user purchased datasets
+	if repoType == types.DatasetRepo && filter.UserPurchased && filter.Username != "" {
+		// First get all dataset IDs that the user has purchased
+		var purchasedDatasetIDs []int64
+		userUUIDQuery := s.db.Operator.Core.NewSelect().
+			Column("uuid").
+			Model(&User{}).
+			Where("username = ?", filter.Username)
+
+		err := s.db.Operator.Core.NewSelect().
+			ColumnExpr("CAST(resource_id AS bigint) as dataset_id").
+			Model(&AccountStatement{}).
+			Where("scene = ?", types.SceneDatasetPurchase).
+			Where("user_uuid = (?)", userUUIDQuery).
+			Where("value < 0"). // Negative value indicates purchase
+			Scan(ctx, &purchasedDatasetIDs)
+
+		if err == nil && len(purchasedDatasetIDs) > 0 {
+			// Filter datasets where related_dataset_id is in the purchased dataset IDs
+			q.Where("datasets.related_dataset_id IN (?)", bun.In(purchasedDatasetIDs))
+		} else {
+			// If no purchased datasets, return empty result
+			return []*Repository{}, 0, nil
+		}
 	}
 
 	if len(filter.Tags) > 0 {
@@ -743,20 +787,13 @@ func (s *repoStoreImpl) PublicToUser(ctx context.Context, repoType types.Reposit
 		needDistinct = true
 	}
 
-	if filter.Sort == "trending" {
-		q.Join("LEFT JOIN recom_repo_scores ON repository.id = recom_repo_scores.repository_id")
-		q.Where("recom_repo_scores.weight_name = ?", RecomWeightTotal)
-		q.ColumnExpr(`COALESCE(recom_repo_scores.score, 0) AS popularity`)
-		needDistinct = true
-	}
-
 	if needDistinct {
 		q.Distinct()
 	}
 
 	filter.Search = strings.TrimSpace(filter.Search)
 	if filter.Search != "" {
-		filter.Search = strings.ToLower(filter.Search) // search is case insensitive in our query, and convert to lower can improve the cache hit rate
+		filter.Search = strings.ToLower(filter.Search)
 		repos, count, err = s.SearchRepoWithCache(ctx, q, repoType, filter, per, page)
 		err = errorx.HandleDBError(err, errorx.Ctx().
 			Set("repo_type", repoType).
@@ -777,6 +814,179 @@ func (s *repoStoreImpl) PublicToUser(ctx context.Context, repoType types.Reposit
 	}
 
 	err = q.Limit(per).Offset((page - 1) * per).Scan(ctx)
+
+	return
+}
+
+func (s *repoStoreImpl) publicToUserTrending(ctx context.Context, repoType types.RepositoryType, userIDs []int64, filter *types.RepoFilter, per, page int, isAdmin bool) (repos []*Repository, count int, err error) {
+	repoTypeTable := map[types.RepositoryType]string{
+		types.ModelRepo:     "models",
+		types.DatasetRepo:   "datasets",
+		types.CodeRepo:      "codes",
+		types.SpaceRepo:     "spaces",
+		types.PromptRepo:    "prompts",
+		types.MCPServerRepo: "mcp_servers",
+		types.SkillRepo:     "skills",
+	}
+	bizTable, ok := repoTypeTable[repoType]
+	if !ok {
+		return
+	}
+
+	q := s.db.Operator.Core.
+		NewSelect().
+		ColumnExpr("r.*, rrs.score AS popularity").
+		TableExpr("recom_repo_scores AS rrs").
+		Join("JOIN repositories AS r ON r.id = rrs.repository_id").
+		Where("rrs.weight_name = ?", RecomWeightTotal).
+		Where("r.repository_type = ?", repoType)
+
+	// Join with business table
+	q.Join(fmt.Sprintf("INNER JOIN %s ON %s.repository_id = r.id", bizTable, bizTable))
+
+	// Filter by dataset type for dataset repo
+	if repoType == types.DatasetRepo && filter.DatasetType != "" {
+		q.Where("datasets.dataset_type = ?", filter.DatasetType)
+	}
+
+	// Filter by user purchased datasets
+	if repoType == types.DatasetRepo && filter.UserPurchased && filter.Username != "" {
+		// First get all dataset IDs that the user has purchased
+		var purchasedDatasetIDs []int64
+		userUUIDQuery := s.db.Operator.Core.NewSelect().
+			Column("uuid").
+			Model(&User{}).
+			Where("username = ?", filter.Username)
+
+		err := s.db.Operator.Core.NewSelect().
+			ColumnExpr("CAST(resource_id AS bigint) as dataset_id").
+			Model(&AccountStatement{}).
+			Where("scene = ?", types.SceneDatasetPurchase).
+			Where("user_uuid = (?)", userUUIDQuery).
+			Where("value < 0"). // Negative value indicates purchase
+			Scan(ctx, &purchasedDatasetIDs)
+
+		if err == nil && len(purchasedDatasetIDs) > 0 {
+			// Filter datasets where related_dataset_id is in the purchased dataset IDs
+			q.Where("datasets.related_dataset_id IN (?)", bun.In(purchasedDatasetIDs))
+		} else {
+			// If no purchased datasets, return empty result
+			return []*Repository{}, 0, nil
+		}
+	}
+
+	q.Where("r.deleted_at IS NULL").
+		Where(fmt.Sprintf("EXISTS (SELECT 1 FROM %s m WHERE m.repository_id = r.id)", bizTable))
+
+	if !isAdmin {
+		if len(userIDs) > 0 {
+			q.Where("r.private = ? OR r.user_id IN (?)", false, bun.In(userIDs))
+		} else {
+			q.Where("r.private = ?", false)
+		}
+	}
+
+	if filter.Source != "" {
+		if filter.Source == "local" {
+			q.Where(`(
+				r.source = 'local'
+				OR EXISTS (
+					SELECT 1 FROM mirrors m
+					JOIN mirror_tasks mt ON mt.mirror_id = m.id
+					WHERE m.repository_id = r.id
+					  AND mt.status = ?
+				)
+			)`, types.MirrorLfsSyncFinished)
+		} else {
+			q.Where("r.source = ?", filter.Source)
+		}
+	}
+
+	if filter.XnetMigrationStatus != nil {
+		q.Where(`EXISTS (
+			SELECT 1 FROM xnet_migration_tasks xmt
+			WHERE xmt.id = r.current_xnet_migration_task_id
+			  AND xmt.status = ?
+		)`, *filter.XnetMigrationStatus)
+	}
+
+	if filter.Tree != nil {
+		q.Where("r.id IN (SELECT target_repo_id FROM model_trees WHERE source_repo_id = ? AND relation = ?)", filter.Tree.RepoId, filter.Tree.Relation)
+	}
+
+	if filter.ListServerless {
+		q.Where("r.id IN (SELECT repo_id FROM deploys WHERE type = ? AND status = ?)", types.ServerlessType, common.Running)
+	}
+
+	if len(filter.SpaceSDK) > 0 {
+		q.Where("EXISTS (SELECT 1 FROM spaces s WHERE s.repository_id = r.id AND s.sdk = ?)", filter.SpaceSDK)
+	}
+
+	if len(filter.Tags) > 0 {
+		for i, tag := range filter.Tags {
+			asRepoTag := fmt.Sprintf("rt%d", i)
+			asTag := fmt.Sprintf("ts%d", i)
+			q.Join(fmt.Sprintf("JOIN repository_tags AS %s ON r.id = %s.repository_id", asRepoTag, asRepoTag)).
+				Join(fmt.Sprintf("JOIN tags AS %s ON %s.tag_id = %s.id", asTag, asRepoTag, asTag))
+			if tag.Category != "" {
+				q.Where(fmt.Sprintf("%s.category = ?", asTag), tag.Category)
+			}
+			if tag.Name != "" {
+				q.Where(fmt.Sprintf("%s.name = ?", asTag), tag.Name)
+			}
+			if tag.Group != "" {
+				q.Where(fmt.Sprintf("%s.group = ?", asTag), tag.Group)
+			}
+		}
+		q.Distinct()
+	}
+
+	count, err = q.Count(ctx)
+	err = errorx.HandleDBError(err, errorx.Ctx().
+		Set("repo_type", repoType).
+		Set("filter", filter),
+	)
+	if err != nil {
+		return
+	}
+
+	err = q.OrderExpr("rrs.score DESC NULLS LAST").
+		Limit(per).
+		Offset((page-1)*per).
+		Scan(ctx, &repos)
+	err = errorx.HandleDBError(err, errorx.Ctx().
+		Set("repo_type", repoType).
+		Set("filter", filter),
+	)
+	if err != nil {
+		return
+	}
+
+	if len(repos) > 0 {
+		repoIDs := make([]int64, len(repos))
+		for i, r := range repos {
+			repoIDs[i] = r.ID
+		}
+		var repoTags []RepositoryTag
+		err = s.db.Operator.Core.
+			NewSelect().
+			Model(&repoTags).
+			Relation("Tag").
+			Where("repository_tag.repository_id IN (?)", bun.In(repoIDs)).
+			Scan(ctx)
+		err = errorx.HandleDBError(err, errorx.Ctx().Set("repo_type", repoType))
+		if err != nil {
+			return
+		}
+		tagMap := make(map[int64][]Tag, len(repos))
+		for i := range repoTags {
+			rt := &repoTags[i]
+			tagMap[rt.RepositoryID] = append(tagMap[rt.RepositoryID], *rt.Tag)
+		}
+		for i := range repos {
+			repos[i].Tags = tagMap[repos[i].ID]
+		}
+	}
 
 	return
 }
@@ -1392,8 +1602,8 @@ func (s *repoStoreImpl) FindMirrorFinishedPrivateModelRepo(ctx context.Context) 
 		Join("JOIN mirrors ON mirrors.repository_id = repository.id").
 		Join("JOIN mirror_tasks ON mirror_tasks.mirror_id = mirrors.id").
 		Where(
-			"repository.repository_type = ? and mirror_tasks.status = ? and repository.sensitive_check_status = ? and repository.private = true",
-			types.ModelRepo, types.MirrorLfsSyncFinished, types.SensitiveCheckPass).
+			"repository.repository_type = ? and mirror_tasks.status = ? and repository.sensitive_check_status in (?) and repository.private = true",
+			types.ModelRepo, types.MirrorLfsSyncFinished, bun.In([]types.SensitiveCheckStatus{types.SensitiveCheckPass, types.SensitiveCheckSkip})).
 		Scan(ctx)
 	return res, err
 }
@@ -1441,4 +1651,24 @@ func (s *repoStoreImpl) GetReposBySearch(ctx context.Context, search string, rep
 		Limit(pageSize).
 		ScanAndCount(ctx)
 	return res, count, err
+}
+
+// GetRepositoriesWithoutStatistics returns repositories without associated RepositoryStatistics
+func (s *repoStoreImpl) GetRepositoriesWithoutStatistics(ctx context.Context, limit, offset int) ([]*Repository, error) {
+	var repos []*Repository
+
+	// Query repositories that don't have a corresponding RepositoryStatistics record
+	query := s.db.Operator.Core.NewSelect().
+		Model(&repos).
+		Where("NOT EXISTS (SELECT 1 FROM repository_statistics WHERE repository_statistics.repository_id = repository.id)").
+		Order("repository.id ASC").
+		Limit(limit).
+		Offset(offset)
+
+	err := query.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return repos, nil
 }

@@ -14,11 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"opencsg.com/csghub-server/builder/deploy/common"
 	"opencsg.com/csghub-server/builder/loki"
-	"opencsg.com/csghub-server/builder/redis"
 	"opencsg.com/csghub-server/builder/store/database"
+	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 	hubcom "opencsg.com/csghub-server/common/utils/common"
@@ -29,23 +28,22 @@ type DeployWorkflowFunc func(buildTask, runTask *database.DeployTask)
 var DeployWorkflow DeployWorkflowFunc
 
 type Deployer interface {
-	Deploy(ctx context.Context, dr types.DeployRepo) (deployID int64, err error)
-	Status(ctx context.Context, dr types.DeployRepo, needDetails bool) (srvName string, status int, instances []types.Instance, err error)
-	Logs(ctx context.Context, dr types.DeployRepo) (*MultiLogReader, error)
-	Stop(ctx context.Context, dr types.DeployRepo) (err error)
+	Deploy(ctx context.Context, dr types.DeployRequest) (deployID int64, err error)
+	Status(ctx context.Context, dr types.DeployRequest, needDetails bool) (srvName string, status int, instances []types.Instance, err error)
+	Logs(ctx context.Context, dr types.DeployRequest) (*MultiLogReader, error)
+	Stop(ctx context.Context, dr types.DeployRequest) (err error)
 	StopBuild(ctx context.Context, req types.ImageBuildStopReq) (err error)
-	Purge(ctx context.Context, dr types.DeployRepo) (err error)
-	Wakeup(ctx context.Context, dr types.DeployRepo) (err error)
-	Exist(ctx context.Context, dr types.DeployRepo) (bool, error)
-	GetReplica(ctx context.Context, dr types.DeployRepo) (int, int, []types.Instance, error)
-	InstanceLogs(ctx context.Context, dr types.DeployRepo) (*MultiLogReader, error)
+	Purge(ctx context.Context, dr types.DeployRequest) (err error)
+	Wakeup(ctx context.Context, dr types.DeployRequest) (err error)
+	Exist(ctx context.Context, dr types.DeployRequest) (bool, error)
+	GetReplica(ctx context.Context, dr types.DeployRequest) (int, int, []types.Instance, error)
+	InstanceLogs(ctx context.Context, dr types.DeployRequest) (*MultiLogReader, error)
 	ListCluster(ctx context.Context) ([]types.ClusterRes, error)
 	GetClusterById(ctx context.Context, clusterId string) (*types.ClusterRes, error)
-	GetClusterUsageById(ctx context.Context, clusterId string) (*types.ClusterRes, error)
 	UpdateCluster(ctx context.Context, data types.ClusterRequest) (*types.UpdateClusterResponse, error)
 	UpdateDeploy(ctx context.Context, dur *types.DeployUpdateReq, deploy *database.Deploy) error
 	StartDeploy(ctx context.Context, deploy *database.Deploy) error
-	CheckResourceAvailable(ctx context.Context, clusterId string, orderDetailID int64, hardWare *types.HardWare) (bool, error)
+	CheckResourceAvailable(ctx context.Context, clusterId string, orderDetailID int64, hardWare *types.HardWare) (bool, []types.ResourceAvailableStatus, error)
 	SubmitEvaluation(ctx context.Context, req types.EvaluationReq) (*types.ArgoWorkFlowRes, error)
 	DeleteEvaluation(ctx context.Context, req types.ArgoWorkFlowDeleteReq) error
 	GetEvaluation(ctx context.Context, req types.EvaluationGetReq) (*types.ArgoWorkFlowRes, error)
@@ -54,19 +52,23 @@ type Deployer interface {
 	DeleteFinetuneJob(ctx context.Context, req types.ArgoWorkFlowDeleteReq) error
 	GetWorkflowLogsInStream(ctx context.Context, req types.FinetuneLogReq) (*MultiLogReader, error)
 	GetWorkflowLogsNonStream(ctx context.Context, req types.FinetuneLogReq) (*loki.LokiQueryResponse, error)
+	IsDefaultScheduler() bool
+	GetSharedModeResourceName(config *config.Config) string
+	LabelNode(ctx context.Context, req *types.NodeLabel) error
 }
 
-func (d *deployer) GenerateUniqueSvcName(dr types.DeployRepo) string {
+func (d *deployer) GenerateUniqueSvcName(dr types.DeployRequest) string {
 	uniqueSvcName := ""
-	if dr.Type == types.SpaceType {
+	switch dr.Type {
+	case types.SpaceType:
 		// space
 		fields := strings.Split(dr.Path, "/")
 		uniqueSvcName = common.UniqueSpaceAppName("u", fields[0], fields[1], dr.SpaceID)
-	} else if dr.Type == types.ServerlessType {
+	case types.ServerlessType:
 		// model serverless
 		fields := strings.Split(dr.Path, "/")
 		uniqueSvcName = common.UniqueSpaceAppName("s", fields[0], fields[1], dr.RepoID)
-	} else {
+	default:
 		// model inference
 		// generate unique service name from uuid when create new deploy by snowflake
 		uniqueSvcName = d.snowflakeNode.Generate().Base36()
@@ -74,7 +76,7 @@ func (d *deployer) GenerateUniqueSvcName(dr types.DeployRepo) string {
 	return uniqueSvcName
 }
 
-func (d *deployer) serverlessDeploy(ctx context.Context, dr types.DeployRepo) (*database.Deploy, error) {
+func (d *deployer) serverlessDeploy(ctx context.Context, dr types.DeployRequest) (*database.Deploy, error) {
 	var (
 		deploy *database.Deploy
 		err    error
@@ -112,7 +114,9 @@ func (d *deployer) serverlessDeploy(ctx context.Context, dr types.DeployRepo) (*
 	deploy.Variables = dr.Variables
 	deploy.ClusterID = dr.ClusterID
 	deploy.Task = types.PipelineTask(dr.Task)
-	// deploy
+	deploy.OwnerNamespace = dr.OwnerNamespace
+	deploy.NodeAffinity = dr.NodeAffinity
+	deploy.Tolerations = dr.Tolerations
 	slog.Debug("do deployer.serverlessDeploy", slog.Any("dr", dr), slog.Any("deploy", deploy))
 	err = d.deployTaskStore.UpdateDeploy(ctx, deploy)
 	if err != nil {
@@ -122,7 +126,7 @@ func (d *deployer) serverlessDeploy(ctx context.Context, dr types.DeployRepo) (*
 	return deploy, nil
 }
 
-func (d *deployer) dedicatedDeploy(ctx context.Context, dr types.DeployRepo) (*database.Deploy, error) {
+func (d *deployer) dedicatedDeploy(ctx context.Context, dr types.DeployRequest) (*database.Deploy, error) {
 	uniqueSvcName := d.GenerateUniqueSvcName(dr)
 	if len(uniqueSvcName) < 1 {
 		err := fmt.Errorf("failed to generate uuid for deploy")
@@ -162,13 +166,16 @@ func (d *deployer) dedicatedDeploy(ctx context.Context, dr types.DeployRepo) (*d
 		Task:             types.PipelineTask(dr.Task),
 		EngineArgs:       dr.EngineArgs,
 		Variables:        dr.Variables,
+		OwnerNamespace:   dr.OwnerNamespace,
+		NodeAffinity:     dr.NodeAffinity,
+		Tolerations:      dr.Tolerations,
 	}
 	updateDatabaseDeploy(deploy, dr)
 	err := d.deployTaskStore.CreateDeploy(ctx, deploy)
 	return deploy, err
 }
 
-func (d *deployer) buildDeploy(ctx context.Context, dr types.DeployRepo) (*database.Deploy, error) {
+func (d *deployer) buildDeploy(ctx context.Context, dr types.DeployRequest) (*database.Deploy, error) {
 	var deploy *database.Deploy = nil
 	var err error = nil
 	slog.Debug("do deployer.buildDeploy check type", slog.Any("dr.Type", dr.Type))
@@ -194,7 +201,7 @@ func (d *deployer) buildDeploy(ctx context.Context, dr types.DeployRepo) (*datab
 	return deploy, nil
 }
 
-func (d *deployer) Deploy(ctx context.Context, dr types.DeployRepo) (int64, error) {
+func (d *deployer) Deploy(ctx context.Context, dr types.DeployRequest) (int64, error) {
 	//check reserved resource
 	err := d.checkOrderDetail(ctx, dr)
 	if err != nil {
@@ -206,37 +213,37 @@ func (d *deployer) Deploy(ctx context.Context, dr types.DeployRepo) (int64, erro
 	if err != nil || deploy == nil {
 		return -1, fmt.Errorf("failed to create deploy in db, %w", err)
 	}
-	// skip build step for model as inference
-	bldTaskStatus := 0
+
+	bldTaskStatus := common.TaskStatusBuildPending
 	bldTaskMsg := ""
 
 	imgStrLen := len(strings.Trim(deploy.ImageID, " "))
 	slog.Debug("do deployer.Deploy check image", slog.Any("deploy.ImageID", deploy.ImageID), slog.Any("imgStrLen", imgStrLen))
 	if imgStrLen > 0 {
+		// skip build step for model as inference or finetune
 		bldTaskStatus = common.TaskStatusBuildSkip
 		bldTaskMsg = "Skip"
 	}
 	slog.Debug("create build task", slog.Any("bldTaskStatus", bldTaskStatus), slog.Any("bldTaskMsg", bldTaskMsg))
 	buildTask := &database.DeployTask{
 		DeployID: deploy.ID,
-		TaskType: 0,
+		TaskType: common.TaskTypeBuild, // build task
 		Status:   bldTaskStatus,
 		Message:  bldTaskMsg,
 	}
 	err = d.deployTaskStore.CreateDeployTask(ctx, buildTask)
 	if err != nil {
-		return -1, fmt.Errorf("create deploy task failed: %w", err)
+		return -1, fmt.Errorf("create build task for repo %d failed: %w", dr.RepoID, err)
 	}
 	runTask := &database.DeployTask{
 		DeployID: deploy.ID,
-		TaskType: 1,
+		TaskType: common.TaskTypeDeploy, // deploy task
 	}
 	err = d.deployTaskStore.CreateDeployTask(ctx, runTask)
 	if err != nil {
-		return -1, fmt.Errorf("create deploy task failed: %w", err)
+		return -1, fmt.Errorf("create deploy task for repo %d failed: %w", dr.RepoID, err)
 	}
 
-	// go func() { _ = d.scheduler.Queue(buildTask.ID) }()
 	buildTask.Deploy = deploy
 	runTask.Deploy = deploy
 
@@ -256,7 +263,7 @@ func (d *deployer) Deploy(ctx context.Context, dr types.DeployRepo) (int64, erro
 	return deploy.ID, nil
 }
 
-func (d *deployer) Status(ctx context.Context, dr types.DeployRepo, needDetails bool) (string, int, []types.Instance, error) {
+func (d *deployer) Status(ctx context.Context, dr types.DeployRequest, needDetails bool) (string, int, []types.Instance, error) {
 	deploy, err := d.deployTaskStore.GetDeployByID(ctx, dr.DeployID)
 	if err != nil || deploy == nil {
 		slog.Error("fail to get deploy by deploy id", slog.Any("DeployID", dr.DeployID), slog.Any("error", err))
@@ -268,28 +275,11 @@ func (d *deployer) Status(ctx context.Context, dr types.DeployRepo, needDetails 
 		slog.WarnContext(ctx, "cluster resources unhealthy")
 		return "", common.ResourceUnhealthy, nil, nil
 	}
-
-	svcName := deploy.SvcName
-	if deploy.Status == common.Pending {
-		//if deploy is pending, no need to check ksvc status
-		return svcName, common.Pending, nil, nil
-	}
-	svc, err := d.imageRunner.Exist(ctx, &types.CheckRequest{
-		SvcName:   svcName,
-		ClusterID: deploy.ClusterID,
-	})
-	if err != nil {
-		slog.Error("fail to get deploy by service name", slog.Any("Service NamE", svcName), slog.Any("error", err))
-		return "", common.Stopped, nil, fmt.Errorf("can't get svc, %w", err)
-	}
-	if svc.Code == common.Stopped || svc.Code == -1 {
-		// like queuing, or stopped, use status from deploy
-		return svcName, deploy.Status, nil, nil
-	}
-	return svcName, svc.Code, svc.Instances, nil
+	// deploy status and instances reported from runner
+	return deploy.SvcName, deploy.Status, deploy.Instances, nil
 }
 
-func (d *deployer) Logs(ctx context.Context, dr types.DeployRepo) (*MultiLogReader, error) {
+func (d *deployer) Logs(ctx context.Context, dr types.DeployRequest) (*MultiLogReader, error) {
 	deploy, err := d.deployTaskStore.GetLatestDeployBySpaceID(ctx, dr.SpaceID)
 	if err != nil {
 		return nil, fmt.Errorf("can't get space latest deploy,%w", err)
@@ -364,7 +354,7 @@ func (d *deployer) readLogsFromLoki(ctx context.Context, params types.ReadLogReq
 	return log, nil
 }
 
-func (d *deployer) Stop(ctx context.Context, dr types.DeployRepo) error {
+func (d *deployer) Stop(ctx context.Context, dr types.DeployRequest) error {
 	targetID := dr.SpaceID // support space only one instance
 	if dr.SpaceID == 0 {
 		targetID = dr.DeployID // support model deploy with multi-instance
@@ -398,7 +388,7 @@ func (d *deployer) StopBuild(ctx context.Context, req types.ImageBuildStopReq) e
 	return nil
 }
 
-func (d *deployer) Purge(ctx context.Context, dr types.DeployRepo) error {
+func (d *deployer) Purge(ctx context.Context, dr types.DeployRequest) error {
 	targetID := dr.SpaceID // support space only one instance
 	if dr.SpaceID == 0 {
 		targetID = dr.DeployID // support model deploy with multi-instance
@@ -418,33 +408,78 @@ func (d *deployer) Purge(ctx context.Context, dr types.DeployRepo) error {
 	return err
 }
 
-func (d *deployer) Wakeup(ctx context.Context, dr types.DeployRepo) error {
-	// srvName := common.UniqueSpaceAppName(dr.Namespace, dr.Name, dr.SpaceID)
+func (d *deployer) Wakeup(ctx context.Context, dr types.DeployRequest) error {
 	svcName := dr.SvcName
-	srvURL := fmt.Sprintf("http://%s.%s", svcName, d.internalRootDomain)
-	// Create a new HTTP client with a timeout
-	client := &http.Client{
-		Timeout: 3 * time.Second,
+	svcURL := fmt.Sprintf("http://%s.%s", svcName, d.internalRootDomain)
+
+	cluster, err := d.clusterStore.ByClusterID(ctx, dr.ClusterID)
+	if err != nil {
+		return err
 	}
 
-	// Send a GET request to wake up the service
-	resp, err := client.Get(srvURL)
+	svcReq := types.EndpointReq{
+		ClusterID: dr.ClusterID,
+		Target:    svcURL,
+		Host:      svcName,
+		Endpoint:  dr.Endpoint,
+		SvcName:   svcName,
+	}
+
+	target, host, err := hubcom.ExtractDeployTargetAndHost(ctx, &cluster, svcReq)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-		slog.Error("Error sending request to Knative service",
+		return err
+	}
+	slog.InfoContext(ctx, "wakeup service endpoint", slog.String("svc_name", svcName),
+		slog.String("svc_url", target), slog.String("host", host))
+
+	// Spawn goroutine to handle HTTP request asynchronously
+	// This ensures the client.Timeout (20s) takes effect instead of the upstream context deadline
+	if len(cluster.AppEndpoint) < 1 {
+		// host is required for remote cluster with app endpoint
+		host = ""
+	}
+	go d.wakeUpDeploy(target, host, dr)
+
+	// Return immediately without waiting for the HTTP request to complete
+	return nil
+}
+
+func (d *deployer) wakeUpDeploy(target, host string, dr types.DeployRequest) {
+	timeout := 20 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to create wakeup request",
 			slog.String("path", fmt.Sprintf("%s/%s", dr.Namespace, dr.Name)),
-			slog.String("svc_name", svcName),
-			slog.String("svc_url", srvURL),
+			slog.String("svc_name", dr.SvcName),
+			slog.String("svc_url", target),
 			slog.Any("error", err))
-		return fmt.Errorf("failed call service endpoint, %w", err)
+		return
+	}
+	if len(host) > 0 {
+		req.Host = host
+	}
+
+	// Create a new HTTP client with a timeout
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	// Send the request
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "wakeup sending request to Knative service",
+			slog.String("path", fmt.Sprintf("%s/%s", dr.Namespace, dr.Name)),
+			slog.String("svc_name", dr.SvcName),
+			slog.String("svc_url", target),
+			slog.Any("error", err))
+		return
 	}
 	defer resp.Body.Close()
 
 	// Check if the request was successful
 	if resp.StatusCode == http.StatusOK {
-		return nil
+		return
 	} else {
 		var err error
 		switch resp.StatusCode {
@@ -467,14 +502,14 @@ func (d *deployer) Wakeup(ctx context.Context, dr types.DeployRepo) error {
 		default:
 			err = fmt.Errorf("unexpected response from service endpoint, status: %d", resp.StatusCode)
 		}
-		return errorx.RemoteSvcFail(err,
-			errorx.Ctx().
-				Set("path", fmt.Sprintf("%s/%s", dr.Namespace, dr.Name)).
-				Set("svc_name", svcName))
+		slog.ErrorContext(ctx, "wakeup service endpoint failed",
+			slog.String("path", fmt.Sprintf("%s/%s", dr.Namespace, dr.Name)),
+			slog.String("svc_name", dr.SvcName),
+			slog.Any("error", err))
 	}
 }
 
-func (d *deployer) Exist(ctx context.Context, dr types.DeployRepo) (bool, error) {
+func (d *deployer) Exist(ctx context.Context, dr types.DeployRequest) (bool, error) {
 	targetID := dr.SpaceID // support space only one instance
 	if dr.SpaceID == 0 {
 		targetID = dr.DeployID // support model deploy with multi-instance
@@ -503,7 +538,7 @@ func (d *deployer) Exist(ctx context.Context, dr types.DeployRepo) (bool, error)
 	return true, nil
 }
 
-func (d *deployer) GetReplica(ctx context.Context, dr types.DeployRepo) (int, int, []types.Instance, error) {
+func (d *deployer) GetReplica(ctx context.Context, dr types.DeployRequest) (int, int, []types.Instance, error) {
 	targetID := dr.SpaceID // support space only one instance
 	if dr.SpaceID == 0 {
 		targetID = dr.DeployID // support model deploy with multi-instance
@@ -544,7 +579,7 @@ func parseSinceTime(since string) time.Time {
 	}
 }
 
-func (d *deployer) InstanceLogs(ctx context.Context, dr types.DeployRepo) (*MultiLogReader, error) {
+func (d *deployer) InstanceLogs(ctx context.Context, dr types.DeployRequest) (*MultiLogReader, error) {
 	slog.Debug("get logs for deploy", slog.Any("deploy", dr))
 
 	deploy, err := d.deployTaskStore.GetDeployByID(ctx, dr.DeployID)
@@ -698,6 +733,13 @@ func (d *deployer) UpdateDeploy(ctx context.Context, dur *types.DeployUpdateReq,
 		deploy.Variables = *dur.Variables
 	}
 
+	if dur.NodeAffinity != nil {
+		deploy.NodeAffinity = dur.NodeAffinity
+	}
+	if len(dur.Tolerations) != 0 {
+		deploy.Tolerations = dur.Tolerations
+	}
+
 	// update deploy table
 	err = d.deployTaskStore.UpdateDeploy(ctx, deploy)
 	if err != nil {
@@ -760,275 +802,6 @@ func (d *deployer) startJobs() {
 	go d.startAccounting()
 }
 
-func (d *deployer) getResourceMap() map[string]string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	resList, err := d.spaceResourceStore.FindAll(ctx)
-	resources := make(map[string]string)
-	if err != nil {
-		slog.Error("failed to get hub resource", slog.Any("error", err))
-	} else {
-		for _, res := range resList {
-			resources[strconv.FormatInt(res.ID, 10)] = res.Name
-		}
-	}
-	return resources
-}
-
-func (d *deployer) startAcctMetering() {
-	for {
-		// run once every STARHUB_SERVER_SYNC_IN_MINUTES minutes
-		// accounting interval in min, get from env config
-		startTimeSec := time.Now().Unix()
-		errLock := d.deployConfig.RedisLocker.GetServerAcctMeteringLock()
-		if errLock != nil && errors.Is(errLock, redis.ErrLockAcquire) {
-			slog.Warn("skip deployer metering only for fail getting distriubte lock", slog.Any("error", errLock))
-			d.sleepAcctInterval(startTimeSec)
-			continue
-		}
-		d.startAcctMeteringProcess()
-		d.sleepAcctInterval(startTimeSec)
-		if errLock != nil {
-			slog.Warn("do metering with get distributed lock error", slog.Any("error", errLock))
-		} else {
-			ok, err := d.deployConfig.RedisLocker.ReleaseServerAcctMeteringLock()
-			if err != nil {
-				slog.Error("failed to release deployer metering lock", slog.Any("error", err), slog.Any("ok", ok))
-			}
-		}
-	}
-}
-
-func (d *deployer) sleepAcctInterval(startTimeSec int64) {
-	// sleep remain seconds until next metering interval
-	totalSecond := int64(d.eventPub.SyncInterval * 60)
-	endTimeSec := time.Now().Unix()
-	remainSeconds := totalSecond - (endTimeSec - startTimeSec)
-	slog.Debug("sleep until next metering interval for deployer metering", slog.Any("remain seconds", remainSeconds))
-	if remainSeconds > 0 {
-		time.Sleep(time.Duration(remainSeconds) * time.Second)
-	}
-}
-
-func (d *deployer) getClusterMap() map[string]database.ClusterInfo {
-	clusterMap := make(map[string]database.ClusterInfo)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	clusters, err := d.clusterStore.List(ctx)
-	if err != nil {
-		slog.Error("failed to get cluster list", slog.Any("error", err))
-		return clusterMap
-	}
-
-	for _, cluster := range clusters {
-		clusterMap[cluster.ClusterID] = cluster
-	}
-	return clusterMap
-}
-
-func (d *deployer) startAcctMeteringProcess() {
-	ctxTimeout, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	runningDeploys, err := d.deployTaskStore.ListAllRunningDeploys(ctxTimeout)
-	if err != nil {
-		slog.Error("skip meterting due to fail to get all running deploys in deployer", slog.Any("error", err))
-		return
-	}
-	resMap := d.getResourceMap()
-	slog.Debug("get resources map", slog.Any("resMap", resMap))
-	eventTime := time.Now()
-	clusterMap := d.getClusterMap()
-	for _, deploy := range runningDeploys {
-		d.startAcctMeteringRequest(resMap, clusterMap, deploy, eventTime)
-	}
-
-	runningEvaluations, err := d.argoWorkflowStore.ListAllRunningEvaluations(ctxTimeout)
-	if err != nil {
-		slog.Error("skip meterting due to fail to get all running evaluations in deployer", slog.Any("error", err))
-		return
-	}
-	for _, evaluation := range runningEvaluations {
-		d.startAcctForEvaluations(clusterMap, evaluation)
-	}
-
-}
-
-func (d *deployer) startAcctForEvaluations(clusterMap map[string]database.ClusterInfo,
-	evaluation database.ArgoWorkflow) {
-	// skip for cluster does not exist
-	cluster, ok := clusterMap[evaluation.ClusterID]
-	if !ok {
-		slog.Warn("skip evaluation metering for no valid cluster found by id",
-			slog.Any("task_id", evaluation.TaskId),
-			slog.Any("cluster_id", evaluation.ClusterID))
-		return
-	}
-
-	// skip metering for cluster is not running
-	if cluster.Status != types.ClusterStatusRunning {
-		slog.Warn("skip evaluation metering for cluster is not running",
-			slog.Any("task_id", evaluation.TaskId),
-			slog.Any("cluster_id", cluster.ClusterID), slog.Any("Region", cluster.Region))
-		return
-	}
-
-	// cluster does not have hearbeat more than 10 mins, ignore it
-	if time.Now().Unix()-cluster.UpdatedAt.Unix() > int64(d.deployConfig.HeartBeatTimeInSec*2) {
-		slog.Warn(fmt.Sprintf("skip evaluation metering for cluster does not have heartbeat more than %d seconds",
-			(d.deployConfig.HeartBeatTimeInSec*2)),
-			slog.Any("task_id", evaluation.TaskId),
-			slog.Any("cluster_id", cluster.ClusterID), slog.Any("Region", cluster.Region),
-			slog.Any("zone", cluster.Zone), slog.Any("provider", cluster.Provider),
-			slog.Any("updated_at", cluster.UpdatedAt))
-		return
-	}
-
-	// skip metering for evaluation does not have heartbeat more than 2 days
-	if time.Now().Unix()-evaluation.StartTime.Unix() > int64(86400*2) {
-		slog.Warn(fmt.Sprintf("skip evaluation metering for cluster does not have heartbeat more than %d seconds",
-			(86400*2)), slog.Any("task_id", evaluation.TaskId))
-		return
-	}
-
-	// ignore deploy without sku resource
-	if evaluation.ResourceId < 1 {
-		return
-	}
-
-	event := types.MeteringEvent{
-		Uuid:         uuid.New(),
-		UserUUID:     evaluation.UserUUID,
-		Value:        int64(d.eventPub.SyncInterval),
-		ValueType:    types.TimeDurationMinType,
-		Scene:        int(types.SceneEvaluation),
-		OpUID:        "",
-		ResourceID:   strconv.FormatInt(evaluation.ResourceId, 10),
-		ResourceName: evaluation.ResourceName,
-		CustomerID:   evaluation.TaskId,
-		CreatedAt:    time.Now(),
-	}
-	str, err := json.Marshal(event)
-	if err != nil {
-		slog.Error("error marshal evaluation metering event", slog.Any("event", event), slog.Any("error", err))
-		return
-	}
-	err = d.eventPub.PublishMeteringEvent(str)
-	if err != nil {
-		slog.Error("failed to pub evaluation metering event", slog.Any("data", string(str)), slog.Any("error", err))
-	} else {
-		slog.Info("pub metering evaluation event success", slog.Any("data", string(str)))
-	}
-}
-
-func (d *deployer) startAcctMeteringRequest(resMap map[string]string, clusterMap map[string]database.ClusterInfo,
-	deploy database.Deploy, eventTime time.Time) {
-	// skip for cluster does not exist
-	cluster, ok := clusterMap[deploy.ClusterID]
-	if !ok {
-		slog.Warn("skip metering for no valid cluster found by id",
-			slog.Any("deploy_id", deploy.ID), slog.Any("svc_name", deploy.SvcName),
-			slog.Any("cluster_id", deploy.ClusterID))
-		return
-	}
-
-	// skip metering for cluster is not running
-	if cluster.Status != types.ClusterStatusRunning {
-		slog.Warn("skip metering for cluster is not running",
-			slog.Any("deploy_id", deploy.ID), slog.Any("svc_name", deploy.SvcName),
-			slog.Any("cluster_id", cluster.ClusterID), slog.Any("Region", cluster.Region),
-			slog.Any("zone", cluster.Zone), slog.Any("provider", cluster.Provider))
-		return
-	}
-
-	// cluster does not have hearbeat more than 10 mins, ignore it
-	if time.Now().Unix()-cluster.UpdatedAt.Unix() > int64(d.deployConfig.HeartBeatTimeInSec*2) {
-		slog.Warn(fmt.Sprintf("skip metering for cluster does not have heartbeat more than %d seconds",
-			(d.deployConfig.HeartBeatTimeInSec*2)),
-			slog.Any("deploy_id", deploy.ID), slog.Any("svc_name", deploy.SvcName),
-			slog.Any("cluster_id", cluster.ClusterID), slog.Any("Region", cluster.Region),
-			slog.Any("zone", cluster.Zone), slog.Any("provider", cluster.Provider),
-			slog.Any("updated_at", cluster.UpdatedAt))
-		return
-	}
-
-	// ignore deploy without sku resource
-	if len(deploy.SKU) < 1 {
-		return
-	}
-	resName, exists := resMap[deploy.SKU]
-	if !exists {
-		slog.Warn("Did not find space resource by id for metering",
-			slog.Any("id", deploy.SKU), slog.Any("deploy_id", deploy.ID), slog.Any("svc_name", deploy.SvcName))
-		return
-	}
-	slog.Debug("metering deploy", slog.Any("deploy", deploy))
-	sceneType := common.GetValidSceneType(deploy.Type)
-	if sceneType == types.SceneUnknow {
-		slog.Error("invalid deploy type of service for metering", slog.Any("deploy", deploy))
-		return
-	}
-	if sceneType == types.SceneModelServerless {
-		// skip metering for model serverless scene
-		return
-	}
-
-	var hardware types.HardWare
-	if err := json.Unmarshal([]byte(deploy.Hardware), &hardware); err != nil {
-		slog.Error("Deploy hardware is invalid format", "hardware", deploy.Hardware, "deploy_id", deploy.ID)
-		return
-	}
-
-	// Get replica count and multiply value by instance count
-	replicaCount := 1
-	//only check for single node deploy, muti-node don't support replica
-	if hardware.Replicas < 2 {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		// Namespace and Name are not used in GetReplica call chain, only SvcName and ClusterID are needed
-		dr := types.DeployRepo{
-			DeployID:  deploy.ID,
-			SpaceID:   deploy.SpaceID,
-			SvcName:   deploy.SvcName,
-			ClusterID: deploy.ClusterID,
-		}
-		actualReplica, _, _, err := d.GetReplica(ctx, dr)
-		if err != nil {
-			slog.Warn("fail to get deploy replica for metering", slog.Any("deploy_id", deploy.ID), slog.Any("error", err))
-		} else if actualReplica > 0 {
-			replicaCount = actualReplica
-		}
-	}
-
-	extra := startAcctRequestFeeExtra(deploy, d.deployConfig.UniqueServiceName)
-	event := types.MeteringEvent{
-		Uuid:         uuid.New(), //v4
-		UserUUID:     deploy.UserUUID,
-		Value:        int64(d.eventPub.SyncInterval) * int64(replicaCount),
-		ValueType:    types.TimeDurationMinType,
-		Scene:        int(sceneType),
-		OpUID:        "",
-		ResourceID:   deploy.SKU,
-		ResourceName: resName,
-		CustomerID:   deploy.SvcName,
-		CreatedAt:    eventTime,
-		Extra:        extra,
-	}
-	str, err := json.Marshal(event)
-	if err != nil {
-		slog.Error("error marshal metering event", slog.Any("event", event), slog.Any("error", err))
-		return
-	}
-	err = d.eventPub.PublishMeteringEvent(str)
-	if err != nil {
-		slog.Error("failed to pub metering event", slog.Any("data", string(str)), slog.Any("error", err))
-	} else {
-		slog.Debug("pub metering event success", slog.Any("data", string(str)))
-	}
-}
-
 // SubmitEvaluation
 func (d *deployer) SubmitEvaluation(ctx context.Context, req types.EvaluationReq) (*types.ArgoWorkFlowRes, error) {
 	env := make(map[string]string)
@@ -1069,11 +842,15 @@ func (d *deployer) SubmitEvaluation(ctx context.Context, req types.EvaluationReq
 		ResourceId:   req.ResourceId,
 		ResourceName: req.ResourceName,
 		Nodes:        req.Nodes,
+		Scheduler:    d.kubeScheduler,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: req.NodeAffinity,
+			Tolerations:  req.Tolerations,
+		},
 	}
 	if req.ResourceId == 0 {
 		flowReq.ShareMode = true
 	}
-	flowReq.Scheduler = common.GenerateScheduler(d.deployConfig)
 	return d.imageRunner.SubmitWorkFlow(ctx, flowReq)
 }
 
@@ -1138,6 +915,8 @@ func (d *deployer) SubmitFinetuneJob(ctx context.Context, req types.FinetuneReq)
 	env["EPOCHS"] = strconv.Itoa(req.Epochs)
 	env["LEARNING_RATE"] = strconv.FormatFloat(req.LearningRate, 'f', -1, 64)
 	env["CUSTOM_ARGS"] = req.CustomeArgs
+	env["REVISION"] = req.Revision
+	env["DATASET_REVISION"] = req.DatasetRevision
 	if len(finetunedModelName) > 0 {
 		env["FINETUNED_MODEL_NAME"] = finetunedModelName
 	}
@@ -1170,6 +949,11 @@ func (d *deployer) SubmitFinetuneJob(ctx context.Context, req types.FinetuneReq)
 		ResourceId:         req.ResourceId,
 		ResourceName:       req.ResourceName,
 		FinetunedModelName: finetunedModelName,
+		Scheduler:          d.kubeScheduler,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: req.NodeAffinity,
+			Tolerations:  req.Tolerations,
+		},
 	}
 	if req.ResourceId == 0 {
 		flowReq.ShareMode = true
@@ -1184,6 +968,7 @@ func (d *deployer) SubmitFinetuneJob(ctx context.Context, req types.FinetuneReq)
 		req.Nodes = append(req.Nodes, types.Node{
 			Name:       node.Name,
 			EnableVXPU: node.EnableVXPU,
+			HasXPU:     node.Hardware.HasXPU() || node.EnableVXPU,
 		})
 	}
 
@@ -1227,20 +1012,7 @@ func (d *deployer) GetWorkflowLogsNonStream(ctx context.Context, req types.Finet
 	labels := map[string]string{
 		types.StreamKeyInstanceName: req.PodName,
 	}
-
-	var queryBuilder strings.Builder
-	queryBuilder.WriteString("{")
-	first := true
-	for k, v := range labels {
-		if !first {
-			queryBuilder.WriteString(",")
-		}
-		fmt.Fprintf(&queryBuilder, `%s="%s"`, k, v)
-		first = false
-	}
-	queryBuilder.WriteString("}")
-	query := queryBuilder.String()
-
+	query := d.lokiClient.GenerateLabelQuery(labels)
 	var startTime = req.SubmitTime
 	if req.Since != "" {
 		startTime = parseSinceTime(req.Since)
@@ -1250,6 +1022,7 @@ func (d *deployer) GetWorkflowLogsNonStream(ctx context.Context, req types.Finet
 		Query:     query,
 		Start:     startTime,
 		Direction: "forward",
+		Limit:     loki.MaxLimit,
 	}
 
 	return d.lokiClient.QueryRange(ctx, params)
@@ -1278,4 +1051,16 @@ func (d *deployer) CheckClusterHealthy(ctx context.Context, deployId string) boo
 		return false
 	}
 	return true
+}
+
+func (d *deployer) IsDefaultScheduler() bool {
+	return d.kubeScheduler == nil
+}
+
+func (d *deployer) GetSharedModeResourceName(config *config.Config) string {
+	resourceName := common.DefaultResourceName
+	if !d.IsDefaultScheduler() {
+		resourceName = config.Runner.VGPUResourceReqKey
+	}
+	return resourceName
 }

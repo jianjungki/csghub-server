@@ -43,7 +43,7 @@ func NewRepoHandler(config *config.Config) (*RepoHandler, error) {
 		c:                         uc,
 		m:                         m,
 		d:                         d,
-		deployStatusCheckInterval: 5 * time.Second,
+		deployStatusCheckInterval: time.Duration(config.Model.DeployStatusCheckInterval) * time.Second,
 		config:                    config,
 	}, nil
 }
@@ -88,7 +88,7 @@ func (h *RepoHandler) CreateRepo(ctx *gin.Context) {
 		}
 		resp, err := h.m.Create(ctx.Request.Context(), modelReq)
 		if err != nil {
-			if strings.Contains(err.Error(), "duplicate key") {
+			if errors.Is(err, errorx.ErrRepoAlreadyExist) || errors.Is(err, errorx.ErrSpaceNameAlreadyExist) || strings.Contains(err.Error(), "duplicate key") {
 				resp := &types.Model{
 					URL: fmt.Sprintf("%s/%s", req.Namespace, req.Name),
 				}
@@ -106,7 +106,7 @@ func (h *RepoHandler) CreateRepo(ctx *gin.Context) {
 		}
 		resp, err := h.d.Create(ctx.Request.Context(), datasetReq)
 		if err != nil {
-			if strings.Contains(err.Error(), "duplicate key") {
+			if errors.Is(err, errorx.ErrRepoAlreadyExist) || errors.Is(err, errorx.ErrSpaceNameAlreadyExist) || strings.Contains(err.Error(), "duplicate key") {
 				resp := &types.Dataset{
 					URL: fmt.Sprintf("%s/%s", req.Namespace, req.Name),
 				}
@@ -627,6 +627,93 @@ func (h *RepoHandler) Branches(ctx *gin.Context) {
 
 	slog.Debug("Get repo branches succeed", slog.String("repo_type", string(req.RepoType)), slog.String("name", name))
 	httpbase.OK(ctx, branches)
+}
+
+// CreateBranch godoc
+// @Security     ApiKey
+// @Summary      Create a new branch in repository
+// @Tags         Repository
+// @Accept       json
+// @Produce      json
+// @Param		 repo_type path string true "models,datasets,codes,spaces or mcps" Enums(models,datasets,codes,spaces,mcps)
+// @Param		 namespace path string true "repo owner name"
+// @Param		 name path string true "repo name"
+// @Param        req body types.CreateBranchReq true  "create branch request"
+// @Success      200  {object}  types.ResponseWithTotal{data=nil} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /{repo_type}/{namespace}/{name}/branches [post]
+func (h *RepoHandler) CreateBranch(ctx *gin.Context) {
+	userName := httpbase.GetCurrentUser(ctx)
+	var req *types.CreateBranchReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+
+	namespace, name, err := common.GetNamespaceAndNameFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+
+	req.Namespace = namespace
+	req.Name = name
+	req.RepoType = common.RepoTypeFromContext(ctx)
+	req.CurrentUser = userName
+
+	err = h.c.CreateBranch(ctx.Request.Context(), req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to create repo branch", slog.Any("error", err), slog.Any("req", req))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+	slog.Info("Create repo branch succeed", slog.String("name", name), slog.String("branch", req.BranchName))
+	httpbase.OK(ctx, nil)
+}
+
+// DeleteBranch godoc
+// @Security     ApiKey
+// @Summary      Delete a branch in repository
+// @Tags         Repository
+// @Accept       json
+// @Produce      json
+// @Param		 repo_type path string true "models,datasets,codes,spaces or mcps" Enums(models,datasets,codes,spaces,mcps)
+// @Param		 namespace path string true "repo owner name"
+// @Param		 name path string true "repo name"
+// @Param		 branch path string true "branch name"
+// @Success      200  {object}  types.ResponseWithTotal{data=nil} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /{repo_type}/{namespace}/{name}/branches/{branch} [delete]
+func (h *RepoHandler) DeleteBranch(ctx *gin.Context) {
+	userName := httpbase.GetCurrentUser(ctx)
+	namespace, name, err := common.GetNamespaceAndNameFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+	branchName := ctx.Param("branch")
+
+	req := &types.DeleteBranchReq{
+		Namespace:   namespace,
+		Name:        name,
+		BranchName:  branchName,
+		RepoType:    common.RepoTypeFromContext(ctx),
+		CurrentUser: userName,
+	}
+
+	err = h.c.DeleteBranch(ctx.Request.Context(), req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to delete repo branch", slog.Any("error", err), slog.Any("req", req))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+	slog.Info("Delete repo branch succeed", slog.String("name", name), slog.String("branch", branchName))
+	httpbase.OK(ctx, nil)
 }
 
 // GetRepoTags
@@ -1913,4 +2000,49 @@ func (h *RepoHandler) GetRepos(ctx *gin.Context) {
 		"Get repos succeed",
 		slog.String("search", search))
 	httpbase.OK(ctx, repos)
+}
+
+// GetRepoSizeByBranch godoc
+// @Security     ApiKey
+// @Summary      Get the repository size for a specific branch
+// @Tags         Repository
+// @Accept       json
+// @Produce      json
+// @Param        repo_type path string true "models,datasets,codes,spaces or mcps" Enums(models,datasets,codes,spaces,mcps)
+// @Param        namespace path string true "repo owner name"
+// @Param        name path string true "repo name"
+// @Param        branch path string true "branch name"
+// @Param        current_user query string false "current user name"
+// @Success      200  {object}  types.Response{data=int64} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /{repo_type}/{namespace}/{name}/size/{branch} [get]
+func (h *RepoHandler) GetRepoSizeByBranch(ctx *gin.Context) {
+	namespace, name, err := common.GetNamespaceAndNameFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+	currentUser := httpbase.GetCurrentUser(ctx)
+	branch := ctx.Param("branch")
+	repoType := common.RepoTypeFromContext(ctx)
+
+	size, err := h.c.GetRepoSizeByBranch(ctx.Request.Context(), repoType, namespace, name, branch, currentUser)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get repo size", slog.String("repo_type", string(repoType)), slog.Any("error", err), slog.String("namespace", namespace), slog.String("name", name), slog.String("branch", branch))
+		if errors.Is(err, errorx.ErrForbidden) {
+			httpbase.ForbiddenError(ctx, err)
+			return
+		}
+		if errors.Is(err, errorx.ErrNotFound) {
+			httpbase.NotFoundError(ctx, err)
+			return
+		}
+		httpbase.ServerError(ctx, err)
+		return
+	}
+
+	slog.Debug("Get repo size succeed", slog.String("repo_type", string(repoType)), slog.String("namespace", namespace), slog.String("name", name), slog.String("branch", branch), slog.Any("size", size))
+	httpbase.OK(ctx, size)
 }

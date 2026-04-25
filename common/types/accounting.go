@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"opencsg.com/csghub-server/common/utils/money"
 	"opencsg.com/csghub-server/common/utils/payment/consts"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ const (
 	MeterFromSource    = "from_source"
 	PromptTokenNum     = "prompt_token_num"
 	CompletionTokenNum = "completion_token_num"
+	OwnerType          = "owner_type"
 )
 
 type OrderStatus int
@@ -61,9 +63,10 @@ var (
 type SKUType int
 
 var (
-	SKUReserve  SKUType = 0 // system reserve
-	SKUCSGHub   SKUType = 1 // csghub server
-	SKUStarship SKUType = 2 // starship
+	SKUReserve    SKUType = 0 // system reserve
+	SKUCSGHub     SKUType = 1 // csghub server
+	SKUStarship   SKUType = 2 // starship
+	SKUAgenticHub SKUType = 3 // agentic hub
 )
 
 type SKUKind int
@@ -81,6 +84,13 @@ var (
 	ChargeCashBalance string = "cash_balance"
 )
 
+// HTTP Header constants for scene detection
+const (
+	SceneHeaderKey        = "X-Scene"    // HTTP header key for scene detection
+	SceneHeaderCSGHub     = "csghub"     // For SceneModelServerless (15)
+	SceneHeaderAgenticHub = "agentichub" // For SceneAgenticHub (30)
+)
+
 type SceneType int
 
 var (
@@ -95,10 +105,13 @@ var (
 	SceneModelFinetune   SceneType = 12 // model finetune
 	SceneMultiSync       SceneType = 13 // multi source sync
 	SceneEvaluation      SceneType = 14 // model evaluation
-	SceneModelServerless SceneType = 15 // model serverless deploy
+	SceneModelServerless SceneType = 15 // serverless and external model from aigateway
 	// starship
 	SceneStarship SceneType = 20 // starship
 	SceneGuiAgent SceneType = 22 // gui agent
+	// SceneAgenticHub SceneType = 30 // agentic hub
+	// dataset
+	SceneDatasetPurchase SceneType = 40 // dataset purchase
 	// unknow
 	SceneUnknow SceneType = 99 // unknow
 )
@@ -144,6 +157,8 @@ type AcctEventReq struct {
 	SubBillID        int64           `json:"sub_bill_id"`
 	Discount         float64         `json:"discount"`
 	RegularValue     float64         `json:"regular_value"`
+	PromptToken      float64         `json:"prompt_token"`
+	CompletionToken  float64         `json:"completion_token"`
 }
 
 // generate charge event from client
@@ -195,12 +210,24 @@ type ActStatementsReq struct {
 }
 
 type AcctBillsReq struct {
-	UserUUID  string `json:"user_id"`
-	Scene     int    `json:"scene"`
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
-	Per       int    `json:"per"`
-	Page      int    `json:"page"`
+	CurrentUser string `json:"current_user"`
+	TargetUUID  string `json:"target_uuid"`
+	Scene       int    `json:"scene"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Per         int    `json:"per"`
+	Page        int    `json:"page"`
+}
+
+type AcctBillsDetailReq struct {
+	CurrentUser  string `json:"current_user"`
+	TargetUUID   string `json:"target_uuid"`
+	Scene        int    `json:"scene"`
+	StartDate    string `json:"start_date"`
+	EndDate      string `json:"end_date"`
+	InstanceName string `json:"instance_name"`
+	Per          int    `json:"per"`
+	Page         int    `json:"page"`
 }
 
 type AcctStatementsRes struct {
@@ -260,21 +287,25 @@ type AcctQuotaStatementReq struct {
 }
 
 type AcctSummary struct {
-	Total            int     `json:"total"`
-	TotalValue       float64 `json:"total_value"`
-	TotalConsumption float64 `json:"total_consumption"`
+	Total                int     `json:"total"`
+	TotalValue           float64 `json:"total_value"`
+	TotalConsumption     float64 `json:"total_consumption"`
+	TotalPromptToken     float64 `json:"total_prompt_token"`
+	TotalCompletionToken float64 `json:"total_completion_token"`
 }
 
 type ITEM struct {
-	Consumption  float64   `json:"consumption"`
-	InstanceName string    `json:"instance_name"`
-	Value        float64   `json:"value"`
-	CreatedAt    time.Time `json:"created_at"`
-	Status       string    `json:"status"`
-	RepoPath     string    `json:"repo_path"`
-	DeployID     int64     `json:"deploy_id"`
-	DeployName   string    `json:"deploy_name"`
-	DeployUser   string    `json:"deploy_user"`
+	Consumption     float64   `json:"consumption"`
+	InstanceName    string    `json:"instance_name"`
+	Value           float64   `json:"value"`
+	CreatedAt       time.Time `json:"created_at"`
+	Status          string    `json:"status"`
+	RepoPath        string    `json:"repo_path"`
+	DeployID        int64     `json:"deploy_id"`
+	DeployName      string    `json:"deploy_name"`
+	DeployUser      string    `json:"deploy_user"`
+	PromptToken     float64   `json:"prompt_token"`
+	CompletionToken float64   `json:"completion_token"`
 }
 
 type BILLS struct {
@@ -375,6 +406,12 @@ type AcctPriceListDBReq struct {
 	Page       int      `json:"page"`
 }
 
+type AcctPriceListByKindsReq struct {
+	SkuType    SKUType   `json:"sku_type"`
+	SkuKinds   []SKUKind `json:"sku_kinds"`
+	ResourceID string    `json:"resource_id"`
+}
+
 // used for listing prices with pagination and filter
 //
 // in accounting service and starhub server
@@ -396,6 +433,7 @@ type AcctPriceListFilter struct {
 type AcctRechargeReq struct {
 	ChannelCode    consts.PaymentChannel `json:"channelCode"`
 	RechargeAmount float64               `json:"rechargeAmount"` //unit yuan
+	OrgName        string                `json:"orgName"`
 }
 
 type AcctRechargeResp struct {
@@ -404,6 +442,16 @@ type AcctRechargeResp struct {
 	RechargeOrderNo string                `json:"orderNo"`
 	Channel         consts.PaymentChannel `json:"channel"`
 	CreateTime      time.Time             `json:"createTime"` //2024-11-18 15:50:47
+}
+
+type AcctRechargeItem struct {
+	TargetUUID  string
+	OpUserUUID  string
+	Description string
+	Amount      *money.Money
+	Channel     consts.PaymentChannel
+	OrgName     string
+	UserName    string
 }
 
 type RechargeStatusResp struct {
@@ -427,6 +475,8 @@ type RechargeResp struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	Description    string    `json:"description"`
 	UserName       string    `json:"user_name"`
+	EntityType     string    `json:"entity_type"`
+	OrgName        string    `json:"org_name"`
 }
 
 const RechargeExtraType = "recharge"
@@ -446,7 +496,7 @@ type UserBalanceResp struct {
 }
 
 type AcctRechargeListReq struct {
-	UserUUID    string `json:"user_uuid"`
+	TargetUUID  string `json:"target_uuid"`
 	Scene       int    `json:"scene"`
 	ActivityID  int64  `json:"activity_id"`
 	StartTime   string `json:"start_time"`
@@ -454,6 +504,7 @@ type AcctRechargeListReq struct {
 	Per         int    `json:"per"`
 	Page        int    `json:"page"`
 	CurrentUser string `json:"-"`
+	OrgName     string `json:"org_name"`
 }
 
 type AcctRecharge struct {
@@ -469,6 +520,26 @@ type AcctRecharge struct {
 	OpDesc     string    `json:"op_desc"`
 }
 
+type NonCashRechargeListResp struct {
+	Data       []NonCashRechargeResp `json:"data"`
+	Total      int                   `json:"total"`
+	TotalValue float64               `json:"total_value"`
+}
+
+type NonCashRechargeResp struct {
+	ID         int64     `json:"id"`
+	EventUUID  string    `json:"event_uuid"`
+	UserUUID   string    `json:"user_id"`
+	Value      float64   `json:"value"`
+	OpUID      string    `json:"op_uid"`
+	CreatedAt  time.Time `json:"created_at"`
+	EventDate  time.Time `json:"event_date"`
+	ActivityID int64     `json:"activity_id"`
+	OpDesc     string    `json:"op_desc"`
+	OpUserName string    `json:"op_user_name"`
+	UserName   string    `json:"user_name"`
+}
+
 type AcctRechargeListResp struct {
 	Data       []AcctRecharge `json:"data"`
 	Total      int            `json:"total"`
@@ -477,6 +548,7 @@ type AcctRechargeListResp struct {
 
 type RechargesIndexReq struct {
 	UserName    string `json:"user_name"`
+	OrgName     string `json:"org_name"`
 	UserUUID    string `json:"user_uuid"`
 	OrderNo     string `json:"order_no"`
 	StartDate   string `json:"start_date"`
@@ -485,6 +557,15 @@ type RechargesIndexReq struct {
 	PaymentType string `json:"recharge_payment_type"`
 	Per         int    `json:"per"`
 	Page        int    `json:"page"`
+}
+
+type PresentsIndexReq struct {
+	UserUUID  string `json:"user_uuid"`
+	UserName  string `json:"user_name"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	Per       int    `json:"per"`
+	Page      int    `json:"page"`
 }
 
 type RechargeIndexResp struct {
@@ -496,6 +577,27 @@ type RechargesIndexResp struct {
 	Data  []*RechargeIndexResp `json:"data"`
 	Total int                  `json:"total"`
 	Sum   int64                `json:"sum"` // Total recharge amount
+}
+
+type PresentIndexResp struct {
+	ID              int64                `json:"id"`
+	EventUUID       string               `json:"event_uuid"`
+	UserUUID        string               `json:"user_uuid"`
+	UserName        string               `json:"user_name"`
+	ActivityID      int64                `json:"activity_id"`
+	Value           float64              `json:"value"`
+	OpUID           string               `json:"op_uid"`
+	OpDesc          string               `json:"op_desc"`
+	ParticipantUUID string               `json:"participant_uuid"`
+	ExpireAt        time.Time            `json:"expire_at"`
+	Status          AccountPresentStatus `json:"status"`
+	CreatedAt       time.Time            `json:"created_at"`
+}
+
+type PresentsIndexResp struct {
+	Data  []*PresentIndexResp `json:"data"`
+	Total int                 `json:"total"`
+	Sum   int64               `json:"sum"` // Total present amount
 }
 
 type SetLowBalanceWarnReq struct {

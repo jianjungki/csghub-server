@@ -88,7 +88,16 @@ func (c *Client) CreateRepo(ctx context.Context, req gitserver.CreateRepoReq) (*
 }
 
 func (c *Client) UpdateRepo(ctx context.Context, req gitserver.UpdateRepoReq) (*gitserver.CreateRepoResp, error) {
-	return nil, nil
+	var err error
+	if req.DefaultBranch != "" {
+		err = c.SetDefaultBranch(ctx, gitserver.SetDefaultBranchReq{
+			Namespace:  req.Namespace,
+			Name:       req.Name,
+			BranchName: req.DefaultBranch,
+			RepoType:   req.RepoType,
+		})
+	}
+	return nil, err
 }
 
 func (c *Client) DeleteRepo(ctx context.Context, relativePath string) error {
@@ -181,6 +190,136 @@ func (c *Client) CopyRepository(ctx context.Context, req gitserver.CopyRepositor
 	_, err = client.CloseAndRecv()
 	if err != nil {
 		return errorx.ErrGitCopyRepositoryFailed(err, errorx.Ctx())
+	}
+
+	return nil
+}
+
+func (c *Client) GetRepoSize(ctx context.Context, req gitserver.GetRepoInfoByPathReq) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	relativePath, err := c.BuildRelativePath(ctx, req.RepoType, req.Namespace, req.Name)
+	if err != nil {
+		return 0, err
+	}
+
+	repository := &gitalypb.Repository{
+		StorageName:  c.config.GitalyServer.Storage,
+		RelativePath: relativePath,
+	}
+
+	// Use ListBlobs to get all blobs for the specified branch
+	listBlobsReq := &gitalypb.ListBlobsRequest{
+		Repository: repository,
+		WithPaths:  true,
+		Revisions:  []string{req.Ref},
+	}
+
+	result, err := c.blobClient.ListBlobs(ctx, listBlobsReq)
+	if err != nil {
+		return 0, errorx.ErrGitGetBlobsFailed(err, errorx.Ctx())
+	}
+
+	var totalSize int64
+	for {
+		allFilesResp, err := result.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, errorx.ErrGitGetBlobsFailed(err, errorx.Ctx())
+		}
+		if allFilesResp != nil {
+			for _, blob := range allFilesResp.Blobs {
+				totalSize += blob.Size
+			}
+		}
+	}
+
+	return totalSize, nil
+}
+
+func (c *Client) GetRepoLfsSize(ctx context.Context, req gitserver.GetRepoInfoByPathReq) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	relativePath, err := c.BuildRelativePath(ctx, req.RepoType, req.Namespace, req.Name)
+	if err != nil {
+		return 0, err
+	}
+
+	repository := &gitalypb.Repository{
+		StorageName:  c.config.GitalyServer.Storage,
+		RelativePath: relativePath,
+	}
+
+	pointersReq := &gitalypb.ListLFSPointersRequest{
+		Repository: repository,
+		Revisions:  []string{req.Ref},
+	}
+
+	allPointersStream, err := c.blobClient.ListLFSPointers(ctx, pointersReq)
+	if err != nil {
+		return 0, errorx.ErrGitGetLfsPointersFailed(err, errorx.Ctx())
+	}
+
+	var totalSize int64
+	for {
+		allPointersResp, err := allPointersStream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, errorx.ErrGitGetLfsPointersFailed(err, errorx.Ctx())
+		}
+		if allPointersResp != nil {
+			for _, pointer := range allPointersResp.LfsPointers {
+				totalSize += pointer.FileSize
+			}
+		}
+	}
+
+	return totalSize, nil
+}
+
+func (c *Client) CreateFork(ctx context.Context, req gitserver.CreateForkReq) error {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	// Build relative path for source repository
+	sourceRelativePath, err := c.BuildRelativePath(ctx, req.SourceRepoType, req.SourceNamespace, req.SourceName)
+	if err != nil {
+		return err
+	}
+
+	// Build relative path for target repository
+	targetRelativePath, err := c.BuildRelativePath(ctx, req.TargetRepoType, req.TargetNamespace, req.TargetName)
+	if err != nil {
+		return err
+	}
+
+	// Create gitaly fork request
+	gitalyReq := &gitalypb.CreateForkRequest{
+		Repository: &gitalypb.Repository{
+			StorageName:  c.config.GitalyServer.Storage,
+			RelativePath: targetRelativePath,
+		},
+		SourceRepository: &gitalypb.Repository{
+			StorageName:  c.config.GitalyServer.Storage,
+			RelativePath: sourceRelativePath,
+		},
+	}
+
+	// Set revision if provided
+	if req.Revision != "" {
+		gitalyReq.Revision = []byte("refs/heads/" + req.Revision)
+	}
+
+	// Call gitaly CreateFork method
+	_, err = c.repoClient.CreateFork(ctx, gitalyReq)
+	if err != nil {
+		return errorx.ErrGitCreateForkFailed(err, errorx.Ctx())
 	}
 
 	return nil

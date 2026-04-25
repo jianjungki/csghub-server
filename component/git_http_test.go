@@ -244,20 +244,21 @@ func TestGitHTTPComponent_Batch(t *testing.T) {
 			hasReadAccess: true,
 			err:           errorx.ErrForbidden,
 		},
-		// {
-		// 	name:           "upload file exist",
-		// 	operation:      types.LFSBatchUpload,
-		// 	hasWriteAccess: true,
-		// 	exist:          true,
-		// 	resp: &types.BatchResponse{
-		// 		Objects: []*types.ObjectResponse{
-		// 			{
-		// 				Pointer: types.Pointer{Oid: existOID, Size: 100},
-		// 				Actions: nil,
-		// 			},
-		// 		},
-		// 	},
-		// },
+		{
+			name:           "upload file exist",
+			operation:      types.LFSBatchUpload,
+			hasWriteAccess: true,
+			exist:          true,
+			resp: &types.BatchResponse{
+				Transfer:       "basic",
+				Objects: []*types.ObjectResponse{
+					{
+						Pointer: types.Pointer{Oid: existOID, Size: 100},
+						Actions: nil,
+					},
+				},
+			},
+		},
 		{
 			name:      "upload and current user empty, 401",
 			operation: types.LFSBatchUpload,
@@ -315,7 +316,7 @@ func TestGitHTTPComponent_Batch(t *testing.T) {
 				reqParams := make(url.Values)
 				url := &url.URL{Scheme: "http", Host: "foo.com", Path: "bar"}
 				gc.mocks.s3Client.EXPECT().PresignedGetObject(
-					ctx, "", "lfs/"+path, types.OssFileExpire, reqParams,
+					ctx, gc.config.S3.Bucket, "lfs/"+path, types.OssFileExpire, reqParams,
 				).Return(url, nil).Maybe()
 			}
 
@@ -431,7 +432,7 @@ func TestGitHTTPComponent_LfsUpload(t *testing.T) {
 			}, nil)
 			if exist {
 				gc.mocks.s3Client.EXPECT().StatObject(
-					ctx, "",
+					ctx, gc.config.S3.Bucket,
 					"lfs/e3/b0/c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 					minio.StatObjectOptions{},
 				).Return(
@@ -439,7 +440,7 @@ func TestGitHTTPComponent_LfsUpload(t *testing.T) {
 				)
 			} else {
 				gc.mocks.s3Client.EXPECT().StatObject(
-					ctx, "",
+					ctx, gc.config.S3.Bucket,
 					"lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e",
 					minio.StatObjectOptions{},
 				).Return(
@@ -452,7 +453,7 @@ func TestGitHTTPComponent_LfsUpload(t *testing.T) {
 
 			if !exist {
 				gc.mocks.s3Client.EXPECT().UploadAndValidate(
-					ctx, "",
+					ctx, gc.config.S3.Bucket,
 					"lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e",
 					rc, int64(100)).Return(minio.UploadInfo{Size: 100}, nil)
 
@@ -485,7 +486,7 @@ func TestGitHTTPComponent_LfsUpload(t *testing.T) {
 			Private: true,
 		}, nil)
 		gc.mocks.s3Client.EXPECT().StatObject(
-			ctx, "",
+			ctx, gc.config.S3.Bucket,
 			"lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e",
 			minio.StatObjectOptions{},
 		).Return(
@@ -520,7 +521,7 @@ func TestGitHTTPComponent_LfsVerify(t *testing.T) {
 	}
 
 	gc.mocks.stores.RepoMock().EXPECT().FindByPath(ctx, types.ModelRepo, "ns", "n").Return(repo, nil)
-	gc.mocks.s3Client.EXPECT().StatObject(ctx, "", "lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e", minio.StatObjectOptions{
+	gc.mocks.s3Client.EXPECT().StatObject(ctx, gc.config.S3.Bucket, "lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e", minio.StatObjectOptions{
 		Checksum: true,
 	}).Return(
 		minio.ObjectInfo{Size: 100}, nil,
@@ -716,7 +717,7 @@ func TestGitHTTPComponent_LfsDownload(t *testing.T) {
 	reqParams := make(url.Values)
 	reqParams.Set("response-content-disposition", fmt.Sprintf("attachment;filename=%s", "sa"))
 	url := &url.URL{Scheme: "http"}
-	gc.mocks.s3Client.EXPECT().PresignedGetObject(ctx, "", "lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e", types.OssFileExpire, reqParams).Return(url, nil)
+	gc.mocks.s3Client.EXPECT().PresignedGetObject(ctx, gc.config.S3.Bucket, "lfs/a3/f8/e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e", types.OssFileExpire, reqParams).Return(url, nil)
 
 	u, err := gc.LfsDownload(ctx, types.DownloadRequest{
 		Oid:         "a3f8e1b4f77bb24e508906c6972f81928f0d926e6daef1b29d12e348b8a3547e",

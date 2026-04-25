@@ -54,6 +54,7 @@ const (
 	PromptRepo    RepositoryType = "prompt"
 	MCPServerRepo RepositoryType = "mcpserver"
 	TemplateRepo  RepositoryType = "template"
+	SkillRepo     RepositoryType = "skill"
 	UnknownRepo   RepositoryType = ""
 
 	OpenCSGSource     RepositorySource = "opencsg"
@@ -117,6 +118,11 @@ type RepoRequest struct {
 	Per       int    `json:"per"`
 }
 
+type RepoFullCheckResult struct {
+	Skipped    bool   `json:"skipped"`
+	WorkflowID string `json:"workflow_id"`
+}
+
 type ValidateYamlReq struct {
 	Content  string         `json:"content"`
 	RepoType RepositoryType `json:"repo_type"`
@@ -132,6 +138,23 @@ type Tag struct {
 	Name    string           `json:"name"`
 	Message string           `json:"message"`
 	Commit  DatasetTagCommit `json:"commit"`
+}
+
+type CreateBranchReq struct {
+	Namespace   string         `json:"namespace"`
+	Name        string         `json:"name"`
+	BranchName  string         `json:"branch_name"`
+	CommitID    string         `json:"commit_id"`
+	RepoType    RepositoryType `json:"-"`
+	CurrentUser string         `json:"-"`
+}
+
+type DeleteBranchReq struct {
+	Namespace   string         `json:"namespace"`
+	Name        string         `json:"name"`
+	BranchName  string         `json:"branch_name"`
+	RepoType    RepositoryType `json:"-"`
+	CurrentUser string         `json:"-"`
 }
 
 type Repository struct {
@@ -166,10 +189,11 @@ type InstanceInfo struct {
 	Message    string     `json:"message"`
 	Reason     string     `json:"reason"`
 	ReadyCount int        `json:"ready_count"`
+	IsCreating bool       `json:"is_creating"`
 }
 
 // repo object(cover model/space/code/dataset) for deployer
-type DeployRepo struct {
+type DeployRequest struct {
 	DeployID            int64      `json:"deploy_id,omitempty"`
 	DeployName          string     `json:"deploy_name,omitempty"`
 	SpaceID             int64      `json:"space_id,omitempty"`
@@ -221,10 +245,18 @@ type DeployRepo struct {
 	Reason              string     `json:"reason,omitempty"`
 	Message             string     `json:"message,omitempty"`
 	SupportFunctionCall bool       `json:"support_function_call,omitempty"`
+	OwnerNamespace      string     `json:"owner_namespace,omitempty"`
 
 	Since    string `json:"since,omitempty"`
 	CommitID string `json:"commit_id,omitempty"`
 	Instance string `json:"instance,omitempty"`
+
+	DeployExtend
+
+	Sandbox struct {
+		Timeout    int64  `json:"timeout,omitempty"`
+		TemplateID string `json:"templateID,omitempty"`
+	}
 }
 
 type RuntimeFrameworkReq struct {
@@ -283,6 +315,8 @@ type RepoFilter struct {
 	SpaceSDK            string
 	XnetMigrationStatus *XnetMigrationTaskStatus
 	Status              string
+	DatasetType         string
+	UserPurchased       bool
 }
 
 type BatchGetFilter struct {
@@ -353,4 +387,17 @@ type ReadLogRequest struct {
 	EndTime      time.Time         `json:"end_time"`
 	Labels       map[string]string `json:"labels"`
 	InstanceName string            `json:"instance_name"`
+}
+
+type CreateForkReq struct {
+	SourceRepoType   RepositoryType `json:"source_repo_type"`
+	SourceNamespace  string         `json:"source_namespace"`
+	SourceName       string         `json:"source_name"`
+	TargetNamespace  string         `json:"target_namespace"`
+	TargetName       string         `json:"target_name"`
+	CurrentUser      string         `json:"current_user"`
+	SourceRepoID     int64          `json:"source_repo_id"`
+	TargetRepoID     int64          `json:"target_repo_id"`
+	RelatedDatasetID int64          `json:"related_dataset_id"`
+	TaskID           int64          `json:"task_id"`
 }

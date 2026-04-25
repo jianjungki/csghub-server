@@ -7,14 +7,17 @@ import (
 	"opencsg.com/csghub-server/api/httpbase"
 	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
+	utils "opencsg.com/csghub-server/common/utils/common"
 )
+
+const PRINT_STRING_LEN = 1000
 
 type ModerationSvcClient interface {
 	PassTextCheck(ctx context.Context, scenario types.SensitiveScenario, text string) (*CheckResult, error)
 	PassImageCheck(ctx context.Context, scenario types.SensitiveScenario, ossBucketName, ossObjectName string) (*CheckResult, error)
 	PassImageURLCheck(ctx context.Context, scenario types.SensitiveScenario, imageURL string) (*CheckResult, error)
-	PassLLMRespCheck(ctx context.Context, text, sessionId string) (*CheckResult, error)
-	PassLLMPromptCheck(ctx context.Context, text, accountId string) (*CheckResult, error)
+	PassLLMRespCheck(ctx context.Context, req types.LLMCheckRequest) (*CheckResult, error)
+	PassLLMPromptCheck(ctx context.Context, req types.LLMCheckRequest) (*CheckResult, error)
 	SubmitRepoCheck(ctx context.Context, repoType types.RepositoryType, namespace, name string) error
 }
 
@@ -48,6 +51,7 @@ func (c *ModerationSvcHttpClient) PassTextCheck(ctx context.Context, scenario ty
 	resp.Data = &CheckResult{}
 	err := c.hc.Post(ctx, path, req, &resp)
 	if err != nil {
+		slog.ErrorContext(ctx, "call moderation service failed", slog.String("error", err.Error()), slog.Any("req", req))
 		return nil, errorx.RemoteSvcFail(err,
 			errorx.Ctx().
 				Set("service", "moderation service").
@@ -58,28 +62,15 @@ func (c *ModerationSvcHttpClient) PassTextCheck(ctx context.Context, scenario ty
 }
 
 // If sessionID is set, used to check stream response; if not set, check non-stream.
-func (c *ModerationSvcHttpClient) PassLLMRespCheck(ctx context.Context, text, sessionId string) (*CheckResult, error) {
-	type ServiceParameters struct {
-		Content   string `json:"content"`
-		SessionId string `json:"sessionId"`
-	}
-	type CheckRequest struct {
-		Service           string            `json:"Service"`
-		ServiceParameters ServiceParameters `json:"ServiceParameters"`
-	}
-	req := &CheckRequest{
-		Service: string(types.ScenarioLLMResModeration),
-		ServiceParameters: ServiceParameters{
-			Content:   text,
-			SessionId: sessionId,
-		},
-	}
+func (c *ModerationSvcHttpClient) PassLLMRespCheck(ctx context.Context, req types.LLMCheckRequest) (*CheckResult, error) {
+	req.Scenario = types.ScenarioLLMResModeration
 	const path = "/api/v1/llmresp"
 	var resp httpbase.R
 	resp.Data = &CheckResult{}
 	err := c.hc.Post(ctx, path, req, &resp)
 	if err != nil {
-		slog.Error("call moderation service failed", slog.String("error", err.Error()))
+		req.Text = utils.TruncStringByRune(req.Text, PRINT_STRING_LEN)
+		slog.ErrorContext(ctx, "call moderation service failed", slog.String("error", err.Error()), slog.Any("req", req))
 		return nil, errorx.RemoteSvcFail(err,
 			errorx.Ctx().
 				Set("service", "moderation service").
@@ -154,7 +145,7 @@ func (c *ModerationSvcHttpClient) SubmitRepoCheck(ctx context.Context, repoType 
 	var resp httpbase.R
 	err := c.hc.Post(ctx, path, req, &resp)
 	if err != nil {
-		slog.Error("call moderation service failed", slog.String("error", err.Error()))
+		slog.ErrorContext(ctx, "call moderation service failed", slog.String("error", err.Error()), slog.Any("req", req))
 		return errorx.RemoteSvcFail(err,
 			errorx.Ctx().
 				Set("service", "moderation service").
@@ -163,28 +154,15 @@ func (c *ModerationSvcHttpClient) SubmitRepoCheck(ctx context.Context, repoType 
 	return nil
 }
 
-func (c *ModerationSvcHttpClient) PassLLMPromptCheck(ctx context.Context, text, accountId string) (*CheckResult, error) {
-	type ServiceParameters struct {
-		Content   string `json:"content"`
-		SessionId string `json:"sessionId"`
-	}
-	type CheckRequest struct {
-		Service           string            `json:"Service"`
-		ServiceParameters ServiceParameters `json:"ServiceParameters"`
-	}
-	req := &CheckRequest{
-		Service: string(types.ScenarioLLMQueryModeration),
-		ServiceParameters: ServiceParameters{
-			Content:   text,
-			SessionId: accountId,
-		},
-	}
+func (c *ModerationSvcHttpClient) PassLLMPromptCheck(ctx context.Context, req types.LLMCheckRequest) (*CheckResult, error) {
+	req.Scenario = types.ScenarioLLMQueryModeration
 	const path = "/api/v1/llmprompt"
 	var resp httpbase.R
 	resp.Data = &CheckResult{}
 	err := c.hc.Post(ctx, path, req, &resp)
 	if err != nil {
-		slog.Error("call moderation service failed", slog.String("error", err.Error()))
+		req.Text = utils.TruncStringByRune(req.Text, PRINT_STRING_LEN)
+		slog.ErrorContext(ctx, "call moderation service failed", slog.String("error", err.Error()), slog.Any("req", req))
 		return nil, errorx.RemoteSvcFail(err,
 			errorx.Ctx().
 				Set("service", "moderation service").

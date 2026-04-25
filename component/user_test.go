@@ -2,6 +2,7 @@ package component
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,6 +117,176 @@ func TestUserComponent_Spaces(t *testing.T) {
 		{ID: 1, Name: "foo"},
 	}, data)
 
+}
+
+func TestUserComponent_Skills(t *testing.T) {
+	testCases := []struct {
+		name           string
+		ownerExists    bool
+		ownerError     error
+		userExists     bool
+		userError      error
+		skills         []database.Skill
+		total          int
+		skillsError    error
+		expectedError  bool
+		expectedTotal  int
+		expectedSkills []types.Skill
+	}{
+		{
+			name:           "Happy path with skills",
+			ownerExists:    true,
+			ownerError:     nil,
+			userExists:     true,
+			userError:      nil,
+			skills:         []database.Skill{{ID: 1, Repository: &database.Repository{Name: "foo"}}},
+			total:          100,
+			skillsError:    nil,
+			expectedError:  false,
+			expectedTotal:  100,
+			expectedSkills: []types.Skill{{ID: 1, Name: "foo"}},
+		},
+		{
+			name:           "Owner does not exist",
+			ownerExists:    false,
+			ownerError:     nil,
+			userExists:     true,
+			userError:      nil,
+			skills:         nil,
+			total:          0,
+			skillsError:    nil,
+			expectedError:  true,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+		{
+			name:           "Current user does not exist",
+			ownerExists:    true,
+			ownerError:     nil,
+			userExists:     false,
+			userError:      nil,
+			skills:         nil,
+			total:          0,
+			skillsError:    nil,
+			expectedError:  true,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+		{
+			name:           "Error checking owner existence",
+			ownerExists:    false,
+			ownerError:     fmt.Errorf("owner error"),
+			userExists:     true,
+			userError:      nil,
+			skills:         nil,
+			total:          0,
+			skillsError:    nil,
+			expectedError:  true,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+		{
+			name:           "Error checking user existence",
+			ownerExists:    true,
+			ownerError:     nil,
+			userExists:     false,
+			userError:      fmt.Errorf("user error"),
+			skills:         nil,
+			total:          0,
+			skillsError:    nil,
+			expectedError:  true,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+		{
+			name:           "Error getting skills",
+			ownerExists:    true,
+			ownerError:     nil,
+			userExists:     true,
+			userError:      nil,
+			skills:         nil,
+			total:          0,
+			skillsError:    fmt.Errorf("skills error"),
+			expectedError:  true,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+		{
+			name:           "No skills returned",
+			ownerExists:    true,
+			ownerError:     nil,
+			userExists:     true,
+			userError:      nil,
+			skills:         []database.Skill{},
+			total:          0,
+			skillsError:    nil,
+			expectedError:  false,
+			expectedTotal:  0,
+			expectedSkills: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.TODO()
+			uc := initializeTestUserComponent(ctx, t)
+
+			uc.mocks.stores.UserMock().EXPECT().IsExist(ctx, "owner").Return(tc.ownerExists, tc.ownerError)
+			
+			// Only expect current user check if owner exists and has no error
+			if tc.ownerExists && tc.ownerError == nil {
+				uc.mocks.stores.UserMock().EXPECT().IsExist(ctx, "user").Return(tc.userExists, tc.userError)
+				
+				// Only expect skill retrieval if both users exist and have no errors
+				if tc.userExists && tc.userError == nil {
+					uc.mocks.stores.SkillMock().EXPECT().ByUsername(ctx, "owner", 10, 1, true).Return(tc.skills, tc.total, tc.skillsError)
+				}
+			}
+
+			data, total, err := uc.Skills(ctx, &types.UserSkillsReq{
+				Owner:       "owner",
+				CurrentUser: "user",
+				PageOpts: types.PageOpts{
+					Page:     1,
+					PageSize: 10,
+				},
+			})
+
+			if tc.expectedError {
+				require.Error(t, err)
+			} else {
+				require.Nil(t, err)
+				require.Equal(t, tc.expectedTotal, total)
+				require.Equal(t, tc.expectedSkills, data)
+			}
+		})
+	}
+
+	// Test with different pagination parameters
+	t.Run("Different pagination parameters", func(t *testing.T) {
+		ctx := context.TODO()
+		uc := initializeTestUserComponent(ctx, t)
+
+		uc.mocks.stores.UserMock().EXPECT().IsExist(ctx, "owner").Return(true, nil)
+		uc.mocks.stores.UserMock().EXPECT().IsExist(ctx, "user").Return(true, nil)
+		uc.mocks.stores.SkillMock().EXPECT().ByUsername(ctx, "owner", 20, 2, true).Return([]database.Skill{
+			{ID: 2, Repository: &database.Repository{Name: "bar"}},
+		}, 50, nil)
+
+		data, total, err := uc.Skills(ctx, &types.UserSkillsReq{
+			Owner:       "owner",
+			CurrentUser: "user",
+			PageOpts: types.PageOpts{
+				Page:     2,
+				PageSize: 20,
+			},
+		})
+		require.Nil(t, err)
+		require.Equal(t, 50, total)
+		require.Equal(t, []types.Skill{
+			{ID: 2, Name: "bar"},
+		}, data)
+	})
 }
 
 func TestUserComponent_AddLikes(t *testing.T) {
@@ -359,9 +530,9 @@ func TestUserComponent_ListServeless(t *testing.T) {
 	data, total, err := uc.ListServerless(ctx, *req)
 	require.Nil(t, err)
 	require.Equal(t, 100, total)
-	require.Equal(t, []types.DeployRepo{
+	require.Equal(t, []types.DeployRequest{
 		{
-			Path: "models_foo/bar", Status: "Stopped", GitPath: "models_foo/bar", Hardware: `{"memory": "foo"}`,
+			Path: "models_foo/bar", Status: "Pending", GitPath: "models_foo/bar", Hardware: `{"memory": "foo"}`,
 			RepoID: 123, SvcName: "svc", ClusterID: "cluster", SKU: "sku",
 		},
 	}, data)
@@ -501,4 +672,28 @@ func TestUserComponent_Finetunes(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 100, total)
 	require.Equal(t, []types.ArgoWorkFlowRes{{ID: 1}}, data)
+}
+
+func TestUserComponent_LikesSkills(t *testing.T) {
+	ctx := context.TODO()
+	uc := initializeTestUserComponent(ctx, t)
+
+	req := &types.UserMCPsReq{
+		Owner:       "owner",
+		CurrentUser: "user",
+		PageOpts: types.PageOpts{
+			Page:     1,
+			PageSize: 10,
+		},
+	}
+	uc.mocks.stores.UserMock().EXPECT().FindByUsername(ctx, "user").Return(database.User{ID: 1}, nil)
+	uc.mocks.stores.SkillMock().EXPECT().UserLikesSkills(ctx, int64(1), 10, 1).Return([]database.Skill{
+		{ID: 1, Repository: &database.Repository{Name: "foo"}},
+	}, 100, nil)
+	data, total, err := uc.LikesSkills(ctx, req)
+	require.Nil(t, err)
+	require.Equal(t, 100, total)
+	require.Equal(t, []types.Skill{
+		{ID: 1, Name: "foo"},
+	}, data)
 }

@@ -81,4 +81,11 @@ type GitServer interface {
 	UpdateRef(ctx context.Context, req UpdateRefReq) error
 	GetRepoLfsPointers(ctx context.Context, req GetRepoFilesReq) ([]*types.LFSPointer, error)
 	CopyRepository(ctx context.Context, req CopyRepositoryReq) error
+	GetFilesByRevisionAndPaths(ctx context.Context, req GetFilesByRevisionAndPathsReq) ([]*types.File, error)
+	// GetRepoSize returns the repository size in kilobytes, including LFS pointer files but not actual LFS file content
+	GetRepoSize(ctx context.Context, req GetRepoInfoByPathReq) (int64, error)
+	// GetRepoLfsSize returns the total size of all LFS files in the repository
+	GetRepoLfsSize(ctx context.Context, req GetRepoInfoByPathReq) (int64, error)
+	// CreateFork creates a fork of a repository
+	CreateFork(ctx context.Context, req CreateForkReq) error
 }

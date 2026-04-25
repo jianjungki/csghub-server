@@ -16,6 +16,7 @@ import (
 	mockdb "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/builder/deploy/common"
 	"opencsg.com/csghub-server/builder/store/database"
+	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/tests"
 	"opencsg.com/csghub-server/common/types"
 )
@@ -44,7 +45,7 @@ func newTestDeployer(t *testing.T) *testDepolyerWithMocks {
 }
 
 func TestDeployer_Stop(t *testing.T) {
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:  0,
 		DeployID: 1,
 		UserUUID: "1",
@@ -113,7 +114,7 @@ func TestDeployer_CheckResourceAvailable(t *testing.T) {
 		},
 	}, nil)
 
-	v, err := tester.CheckResourceAvailable(ctx, "", 0, &types.HardWare{Memory: "10Gi"})
+	v, _, err := tester.CheckResourceAvailable(ctx, "", 0, &types.HardWare{Memory: "10Gi"})
 	require.NoError(t, err)
 	require.True(t, v)
 }
@@ -139,6 +140,8 @@ func TestDeployer_updateEvaluationEnvHardware(t *testing.T) {
 }
 
 func Test_CheckNodeResource(t *testing.T) {
+	config := &config.Config{}
+
 	baseNode := types.NodeResourceInfo{
 		NodeHardware: types.NodeHardware{
 			AvailableCPU: 16,
@@ -202,9 +205,9 @@ func Test_CheckNodeResource(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := checkNodeResource(tc.node, tc.hardware)
-			if got != tc.want {
-				t.Errorf("checkNodeResource() = %v, want %v", got, tc.want)
+			got := checkNodeResource(tc.node, tc.hardware, config)
+			if got.Available != tc.want {
+				t.Errorf("checkNodeResource() = %v, want %v", got.Available, tc.want)
 			}
 		})
 	}

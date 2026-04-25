@@ -42,6 +42,7 @@ type deployer struct {
 	lokiClient            sender.LogSender
 	logReporter           reporter.LogCollector
 	config                *config.Config
+	kubeScheduler         *types.Scheduler
 }
 
 func newDeployer(ib imagebuilder.Builder, ir imagerunner.Runner, c common.DeployConfig, logReporter reporter.LogCollector, config *config.Config, startJobs bool) (*deployer, error) {
@@ -70,8 +71,8 @@ func newDeployer(ib imagebuilder.Builder, ir imagerunner.Runner, c common.Deploy
 		logReporter:           logReporter,
 		argoWorkflowStore:     database.NewArgoWorkFlowStore(),
 		config:                config,
+		kubeScheduler:         common.GenerateScheduler(c),
 	}
-
 	if startJobs {
 		d.startJobs()
 	}
@@ -82,7 +83,7 @@ func (d *deployer) checkOrderDetailByID(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (d *deployer) checkOrderDetail(ctx context.Context, dr types.DeployRepo) error {
+func (d *deployer) checkOrderDetail(ctx context.Context, dr types.DeployRequest) error {
 	return nil
 }
 
@@ -90,7 +91,7 @@ func (d *deployer) updateUserResourceByOrder(ctx context.Context, deploy *databa
 	return nil
 }
 
-func (d *deployer) releaseUserResourceByOrder(ctx context.Context, dr types.DeployRepo) error {
+func (d *deployer) releaseUserResourceByOrder(ctx context.Context, dr types.DeployRequest) error {
 	return nil
 }
 
@@ -98,18 +99,33 @@ func (d *deployer) startAccounting() {
 	go d.startAcctMetering()
 }
 
-func checkNodeResource(node types.NodeResourceInfo, hardware *types.HardWare) bool {
+func checkNodeResource(node types.NodeResourceInfo, hardware *types.HardWare, config *config.Config) types.ResourceAvailableStatus {
+	if isCPUOnlyWorkload(hardware) && isXPUNode(node) {
+		return types.ResourceAvailableStatus{
+			Available: false,
+			NodeName:  node.NodeName,
+			Reason:    types.UnAvailableTypeInvalidHardware,
+		}
+	}
 
 	if hardware.Cpu.Num != "" {
 		requestedCPU, err := resource.ParseQuantity(hardware.Cpu.Num)
 		if err != nil {
 			slog.Error("failed to parse hardware cpu num", slog.String("cpu", hardware.Cpu.Num), slog.Any("error", err))
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInvalidCPUNum,
+			}
 		}
 		cores := float64(requestedCPU.MilliValue()) / 1000.0
 		cpu := math.Round(cores*10) / 10
 		if cpu > node.AvailableCPU {
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInsufficientCPU,
+			}
 		}
 	}
 
@@ -118,7 +134,11 @@ func checkNodeResource(node types.NodeResourceInfo, hardware *types.HardWare) bo
 		requestedMemory, err := resource.ParseQuantity(hardware.Memory)
 		if err != nil {
 			slog.Error("failed to parse hardware memory", slog.String("memory", hardware.Memory), slog.Any("error", err))
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInvalidMemorySize,
+			}
 		}
 
 		requestedMemoryGiB := float32(requestedMemory.Value()) / (1024 * 1024 * 1024)
@@ -127,7 +147,11 @@ func checkNodeResource(node types.NodeResourceInfo, hardware *types.HardWare) bo
 			slog.Warn("insufficient memory resources",
 				slog.Any("requestedGiB", requestedMemoryGiB),
 				slog.Any("availableGiB", node.AvailableMem))
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInsufficientMemory,
+			}
 		}
 	}
 
@@ -135,14 +159,30 @@ func checkNodeResource(node types.NodeResourceInfo, hardware *types.HardWare) bo
 		gpu, err := strconv.Atoi(hardware.Gpu.Num)
 		if err != nil {
 			slog.Error("failed to parse hardware gpu ", slog.Any("error", err))
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInvalidXPUNum,
+			}
 		}
 		if gpu > int(node.AvailableXPU) || hardware.Gpu.Type != node.XPUModel {
-			return false
+			return types.ResourceAvailableStatus{
+				Available: false,
+				NodeName:  node.NodeName,
+				Reason:    types.UnAvailableTypeInsufficientXPU,
+			}
 		}
 	}
 
-	return true
+	return types.ResourceAvailableStatus{
+		Available: true,
+		NodeName:  node.NodeName,
+		Reason:    types.AvailableTypeOK,
+	}
+}
+
+func (d *deployer) LabelNode(ctx context.Context, req *types.NodeLabel) error {
+	return nil
 }
 
 func (d *deployer) calcResources(ctx context.Context, clusterId string, clusterResponse *types.ClusterRes) ([]types.NodeResourceInfo, error) {
@@ -156,5 +196,5 @@ func startAcctRequestFeeExtra(deploy database.Deploy, source string) string {
 	return ""
 }
 
-func updateDatabaseDeploy(dp *database.Deploy, dt types.DeployRepo) {
+func updateDatabaseDeploy(dp *database.Deploy, dt types.DeployRequest) {
 }

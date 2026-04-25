@@ -112,19 +112,32 @@ type (
 	OrgCollectionsReq = OrgDatasetsReq
 	OrgPromptsReq     = OrgDatasetsReq
 	OrgMCPsReq        = OrgDatasetsReq
+	OrgFinetunesReq   = OrgDatasetsReq
+	OrgEvaluationsReq = OrgDatasetsReq
+	OrgNotebooksReq   = OrgDatasetsReq
 )
+
+// OrgRunDeploysReq is used for listing organization run deploys (e.g. inference).
+type OrgRunDeploysReq struct {
+	Namespace   string         `json:"-"`
+	CurrentUser string         `json:"-"`
+	RepoType    RepositoryType `json:"-"`
+	DeployType  int            `json:"-"`
+	PageOpts
+}
 
 type Organization struct {
 	// unique name of the organization
-	Name         string    `json:"path"`
-	Nickname     string    `json:"name,omitempty"`
-	Homepage     string    `json:"homepage,omitempty"`
-	Logo         string    `json:"logo,omitempty"`
-	OrgType      string    `json:"org_type,omitempty"`
-	Verified     bool      `json:"verified"`
-	UserID       int64     `json:"user_id,omitempty"`
-	VerifyStatus string    `json:"verify_status,omitempty"`
-	UUID         uuid.UUID `json:"uuid,omitempty"`
+	Name         string     `json:"path"`
+	Nickname     string     `json:"name,omitempty"`
+	Homepage     string     `json:"homepage,omitempty"`
+	Logo         string     `json:"logo,omitempty"`
+	OrgType      string     `json:"org_type,omitempty"`
+	Verified     bool       `json:"verified"`
+	UserID       int64      `json:"user_id,omitempty"`
+	VerifyStatus string     `json:"verify_status,omitempty"`
+	UUID         uuid.UUID  `json:"uuid,omitempty"`
+	Namespace    *Namespace `json:"namespace,omitempty"`
 }
 
 type Member struct {

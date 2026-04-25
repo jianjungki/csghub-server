@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"opencsg.com/csghub-server/moderation/checker"
 
@@ -68,7 +69,7 @@ var cmdLaunch = &cobra.Command{
 
 		deploy.DeployWorkflow = func(buildTask, runTask *database.DeployTask) {
 			if err := serverworkflow.StartNewDeployTaskWithCancelOld(buildTask, runTask); err != nil {
-				slog.Error("start new deploy task failed", slog.Any("error", err))
+				slog.Error("start new build and deploy task failed", slog.Any("error", err))
 			}
 		}
 		slog.Info("init model inference deployer")
@@ -81,6 +82,9 @@ var cmdLaunch = &cobra.Command{
 		temporalClient, err := temporal.NewClient(client.Options{
 			HostPort: cfg.WorkFLow.Endpoint,
 			Logger:   log.NewStructuredLogger(slog.Default()),
+			ConnectionOptions: client.ConnectionOptions{
+				GetSystemInfoTimeout: time.Duration(cfg.Temporal.GetSystemInfoTimeout) * time.Second,
+			},
 		}, instrumentation.TemporalWorker)
 		if err != nil {
 			return fmt.Errorf("unable to create temporal client, error: %w", err)
@@ -93,10 +97,7 @@ var cmdLaunch = &cobra.Command{
 		}
 
 		slog.Info("start moderation temporal workflow")
-		err = moderationworkflow.StartWorker(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to start moderation worker, error: %w", err)
-		}
+		moderationworkflow.RegisterWorker(temporalClient)
 
 		slog.Info("start notification temporal workflow")
 		err = notificationworkflow.StartWorkflow(cfg)

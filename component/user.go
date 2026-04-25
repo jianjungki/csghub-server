@@ -9,10 +9,13 @@ import (
 	"strings"
 
 	"opencsg.com/csghub-server/builder/deploy"
+	"opencsg.com/csghub-server/builder/deploy/common"
 	"opencsg.com/csghub-server/builder/git"
 	"opencsg.com/csghub-server/builder/git/gitserver"
+	"opencsg.com/csghub-server/builder/git/membership"
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
+	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 )
 
@@ -33,9 +36,9 @@ type UserComponent interface {
 	LikesCodes(ctx context.Context, req *types.UserModelsReq) ([]types.Code, int, error)
 	LikesModels(ctx context.Context, req *types.UserModelsReq) ([]types.Model, int, error)
 	LikesDatasets(ctx context.Context, req *types.UserDatasetsReq) ([]types.Dataset, int, error)
-	ListDeploys(ctx context.Context, repoType types.RepositoryType, req *types.DeployReq) ([]types.DeployRepo, int, error)
-	ListInstances(ctx context.Context, req *types.UserRepoReq) ([]types.DeployRepo, int, error)
-	ListServerless(ctx context.Context, req types.DeployReq) ([]types.DeployRepo, int, error)
+	ListDeploys(ctx context.Context, repoType types.RepositoryType, req *types.DeployReq) ([]types.DeployRequest, int, error)
+	ListInstances(ctx context.Context, req *types.UserRepoReq) ([]types.DeployRequest, int, error)
+	ListServerless(ctx context.Context, req types.DeployReq) ([]types.DeployRequest, int, error)
 	CreateUserResource(ctx context.Context, req types.CreateUserResourceReq) error
 	DeleteUserResource(ctx context.Context, username string, orderDetailId int64) error
 	// GetUserResource
@@ -44,9 +47,15 @@ type UserComponent interface {
 	Prompts(ctx context.Context, req *types.UserPromptsReq) ([]types.PromptRes, int, error)
 	Evaluations(ctx context.Context, req *types.UserEvaluationReq) ([]types.ArgoWorkFlowRes, int, error)
 	MCPServers(ctx context.Context, req *types.UserMCPsReq) ([]types.MCPServer, int, error)
+	Skills(ctx context.Context, req *types.UserMCPsReq) ([]types.Skill, int, error)
 	LikesMCPServers(ctx context.Context, req *types.UserMCPsReq) ([]types.MCPServer, int, error)
 	ListNotebooks(ctx context.Context, req *types.DeployReq) ([]types.NotebookRes, int, error)
 	ListFinetunes(ctx context.Context, req *types.UserEvaluationReq) ([]types.ArgoWorkFlowRes, int, error)
+	LikesSkills(ctx context.Context, req *types.UserMCPsReq) ([]types.Skill, int, error)
+	// ListDeploysByNamespace lists run deploys (e.g. inference) by owner namespace (org or user).
+	ListDeploysByNamespace(ctx context.Context, req *types.OrgRunDeploysReq) ([]types.DeployRequest, int, error)
+	// ListNotebooksByNamespace lists notebooks by owner namespace (org or user).
+	ListNotebooksByNamespace(ctx context.Context, req *types.OrgNotebooksReq) ([]types.NotebookRes, int, error)
 }
 
 func NewUserComponent(config *config.Config) (UserComponent, error) {
@@ -88,6 +97,7 @@ func NewUserComponent(config *config.Config) (UserComponent, error) {
 	c.promptStore = database.NewPromptStore()
 	c.workflowStore = database.NewArgoWorkFlowStore()
 	c.mcpServerStore = database.NewMCPServerStore()
+	c.skillStore = database.NewSkillStore()
 	return c, nil
 }
 
@@ -112,6 +122,7 @@ type userComponentImpl struct {
 	promptStore         database.PromptStore
 	workflowStore       database.ArgoWorkFlowStore
 	mcpServerStore      database.MCPServerStore
+	skillStore          database.SkillStore
 }
 
 func (c *userComponentImpl) Datasets(ctx context.Context, req *types.UserDatasetsReq) ([]types.Dataset, int, error) {
@@ -544,7 +555,7 @@ func (c *userComponentImpl) LikesDatasets(ctx context.Context, req *types.UserDa
 	return resDatasets, total, nil
 }
 
-func (c *userComponentImpl) ListServerless(ctx context.Context, req types.DeployReq) ([]types.DeployRepo, int, error) {
+func (c *userComponentImpl) ListServerless(ctx context.Context, req types.DeployReq) ([]types.DeployRequest, int, error) {
 	user, err := c.userStore.FindByUsername(ctx, req.CurrentUser)
 	if err != nil {
 		newError := fmt.Errorf("failed to check for the presence of the user:%s, error:%w", req.CurrentUser, err)
@@ -560,10 +571,10 @@ func (c *userComponentImpl) ListServerless(ctx context.Context, req types.Deploy
 		return nil, 0, newError
 	}
 
-	var resDeploys []types.DeployRepo
+	var resDeploys []types.DeployRequest
 	for _, deploy := range deploys {
 		repoPath := strings.TrimPrefix(deploy.GitPath, string(req.RepoType)+"s_")
-		resDeploys = append(resDeploys, types.DeployRepo{
+		resDeploys = append(resDeploys, types.DeployRequest{
 			DeployID:         deploy.ID,
 			DeployName:       deploy.DeployName,
 			Path:             repoPath,
@@ -584,6 +595,72 @@ func (c *userComponentImpl) ListServerless(ctx context.Context, req types.Deploy
 			UpdatedAt:        deploy.UpdatedAt,
 			Type:             deploy.Type,
 			SKU:              deploy.SKU,
+			Task:             string(deploy.Task),
+		})
+	}
+	return resDeploys, total, nil
+}
+
+func (c *userComponentImpl) ListDeploysByNamespace(ctx context.Context, req *types.OrgRunDeploysReq) ([]types.DeployRequest, int, error) {
+	if req.CurrentUser != "" {
+		canRead, err := c.repoComponent.CheckCurrentUserPermission(ctx, req.CurrentUser, req.Namespace, membership.RoleRead)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to check namespace permission: %w", err)
+		}
+		if !canRead {
+			return nil, 0, errorx.ErrForbiddenMsg("users do not have permission to view run deploys in this namespace")
+		}
+	}
+	deployReq := &types.DeployReq{
+		PageOpts:   types.PageOpts{Page: req.Page, PageSize: req.PageSize},
+		RepoType:   req.RepoType,
+		DeployType: req.DeployType,
+	}
+	deploys, total, err := c.deployTaskStore.ListDeployByOwnerNamespace(ctx, req.Namespace, deployReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get namespace deploys: %w", err)
+	}
+	var resDeploys []types.DeployRequest
+	for _, deploy := range deploys {
+		d := &database.Deploy{
+			SvcName:   deploy.SvcName,
+			ClusterID: deploy.ClusterID,
+			Status:    deploy.Status,
+		}
+		endpoint, provider := c.repoComponent.GenerateEndpoint(ctx, d)
+		repoPath := strings.TrimPrefix(deploy.GitPath, string(req.RepoType)+"s_")
+		var hardware types.HardWare
+		_ = json.Unmarshal([]byte(deploy.Hardware), &hardware)
+		resourceType := common.ResourceType(hardware)
+		tag := ""
+		tags, _ := c.repoStore.TagsWithCategory(ctx, deploy.RepoID, "task")
+		if len(tags) > 0 {
+			tag = tags[0].Name
+		}
+		resDeploys = append(resDeploys, types.DeployRequest{
+			DeployID:         deploy.ID,
+			DeployName:       deploy.DeployName,
+			Path:             repoPath,
+			RepoID:           deploy.RepoID,
+			SvcName:          deploy.SvcName,
+			Status:           deployStatusCodeToString(deploy.Status),
+			Hardware:         deploy.Hardware,
+			Env:              deploy.Env,
+			RuntimeFramework: deploy.RuntimeFramework,
+			ImageID:          deploy.ImageID,
+			MinReplica:       deploy.MinReplica,
+			MaxReplica:       deploy.MaxReplica,
+			GitPath:          deploy.GitPath,
+			GitBranch:        deploy.GitBranch,
+			ClusterID:        deploy.ClusterID,
+			SecureLevel:      deploy.SecureLevel,
+			CreatedAt:        deploy.CreatedAt,
+			UpdatedAt:        deploy.UpdatedAt,
+			Type:             deploy.Type,
+			Endpoint:         endpoint,
+			Provider:         provider,
+			ResourceType:     string(resourceType),
+			RepoTag:          tag,
 			Task:             string(deploy.Task),
 		})
 	}
@@ -744,6 +821,53 @@ func (c *userComponentImpl) MCPServers(ctx context.Context, req *types.UserMCPsR
 	return resMCPs, total, nil
 }
 
+func (c *userComponentImpl) Skills(ctx context.Context, req *types.UserSkillsReq) ([]types.Skill, int, error) {
+	ownerExists, err := c.userStore.IsExist(ctx, req.Owner)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to check skill owner, error: %w", err)
+	}
+	if !ownerExists {
+		return nil, 0, errors.New("skill owner does not exist")
+	}
+	if len(req.CurrentUser) > 0 {
+		currentUserExists, err := c.userStore.IsExist(ctx, req.CurrentUser)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to check current user, error: %w", err)
+		}
+		if !currentUserExists {
+			return nil, 0, errors.New("current user does not exist")
+		}
+	}
+
+	onlyPublic := req.Owner != req.CurrentUser
+	skills, total, err := c.skillStore.ByUsername(ctx, req.Owner, req.PageSize, req.Page, onlyPublic)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list owners %s skills, error: %w", req.Owner, err)
+	}
+	var resSkills []types.Skill
+
+	for _, skill := range skills {
+		resSkills = append(resSkills, types.Skill{
+			ID:           skill.ID,
+			Name:         skill.Repository.Name,
+			Nickname:     skill.Repository.Nickname,
+			Description:  skill.Repository.Description,
+			Likes:        skill.Repository.Likes,
+			Downloads:    skill.Repository.DownloadCount,
+			Path:         skill.Repository.Path,
+			RepositoryID: skill.RepositoryID,
+			Private:      skill.Repository.Private,
+			CreatedAt:    skill.CreatedAt,
+			UpdatedAt:    skill.Repository.UpdatedAt,
+			Source:       skill.Repository.Source,
+			SyncStatus:   skill.Repository.SyncStatus,
+			License:      skill.Repository.License,
+		})
+	}
+
+	return resSkills, total, nil
+}
+
 func (c *userComponentImpl) LikesMCPServers(ctx context.Context, req *types.UserMCPsReq) ([]types.MCPServer, int, error) {
 	user, err := c.userStore.FindByUsername(ctx, req.CurrentUser)
 	if err != nil {
@@ -775,6 +899,40 @@ func (c *userComponentImpl) LikesMCPServers(ctx context.Context, req *types.User
 			GithubPath:   mcpServer.Repository.GithubPath,
 			ToolsNum:     mcpServer.ToolsNum,
 			StarNum:      mcpServer.Repository.StarCount,
+		})
+	}
+
+	return res, total, nil
+}
+
+func (c *userComponentImpl) LikesSkills(ctx context.Context, req *types.UserMCPsReq) ([]types.Skill, int, error) {
+	user, err := c.userStore.FindByUsername(ctx, req.CurrentUser)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get user by username %s, error: %w", req.CurrentUser, err)
+	}
+
+	skills, total, err := c.skillStore.UserLikesSkills(ctx, user.ID, req.PageSize, req.Page)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get user liked skills, error: %w", err)
+	}
+
+	var res []types.Skill
+	for _, skill := range skills {
+		res = append(res, types.Skill{
+			ID:           skill.ID,
+			Name:         skill.Repository.Name,
+			Nickname:     skill.Repository.Nickname,
+			Description:  skill.Repository.Description,
+			Likes:        skill.Repository.Likes,
+			Downloads:    skill.Repository.DownloadCount,
+			Path:         skill.Repository.Path,
+			RepositoryID: skill.RepositoryID,
+			Private:      skill.Repository.Private,
+			CreatedAt:    skill.CreatedAt,
+			UpdatedAt:    skill.Repository.UpdatedAt,
+			Source:       skill.Repository.Source,
+			SyncStatus:   skill.Repository.SyncStatus,
+			License:      skill.Repository.License,
 		})
 	}
 

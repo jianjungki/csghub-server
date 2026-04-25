@@ -73,7 +73,7 @@ type ModelComponent interface {
 	Update(ctx context.Context, req *types.UpdateModelReq) (*types.Model, error)
 	Delete(ctx context.Context, namespace, name, currentUser string) error
 	Show(ctx context.Context, namespace, name, currentUser string, needOpWeight, needMultiSync bool) (*types.Model, error)
-	GetServerless(ctx context.Context, namespace, name, currentUser string) (*types.DeployRepo, error)
+	GetServerless(ctx context.Context, namespace, name, currentUser string) (*types.DeployRequest, error)
 	SDKModelInfo(ctx context.Context, namespace, name, ref, currentUser string, blobs bool) (*types.SDKModelInfo, error)
 	Relations(ctx context.Context, namespace, name, currentUser string) (*types.Relations, error)
 	SetRelationDatasets(ctx context.Context, req types.RelationDatasets) error
@@ -134,6 +134,11 @@ func NewModelComponent(config *config.Config) (ModelComponent, error) {
 	c.xnetMigrationTaskStore = database.NewXnetMigrationTaskStore()
 	c.lfsMetaObjectStore = database.NewLfsMetaObjectStore()
 
+	c.clusterComponent, err = NewClusterComponent(config)
+	if err != nil {
+		return nil, err
+	}
+
 	dc := dcommon.BuildDeployConfig(config)
 	ir, err := imagerunner.NewRemoteRunner(dc.ImageRunnerURL, dc)
 	if err != nil {
@@ -169,6 +174,7 @@ type modelComponentImpl struct {
 	mirrorStore               database.MirrorStore
 	xnetMigrationTaskStore    database.XnetMigrationTaskStore
 	lfsMetaObjectStore        database.LfsMetaObjectStore
+	clusterComponent          ClusterComponent
 }
 
 func (c *modelComponentImpl) Index(ctx context.Context, filter *types.RepoFilter, per, page int, needOpWeight bool) ([]*types.Model, int, error) {
@@ -644,7 +650,7 @@ func updateDisabledReason(resModel *types.Model, archs []string) {
 	}
 }
 
-func (c *modelComponentImpl) GetServerless(ctx context.Context, namespace, name, currentUser string) (*types.DeployRepo, error) {
+func (c *modelComponentImpl) GetServerless(ctx context.Context, namespace, name, currentUser string) (*types.DeployRequest, error) {
 	model, err := c.modelStore.FindByPath(ctx, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find model, error: %w", err)
@@ -672,7 +678,7 @@ func (c *modelComponentImpl) GetServerless(ctx context.Context, namespace, name,
 		entrypoint = val
 	}
 
-	resDeploy := types.DeployRepo{
+	resDeploy := types.DeployRequest{
 		DeployID:         deploy.ID,
 		DeployName:       deploy.DeployName,
 		RepoID:           deploy.RepoID,
@@ -1066,7 +1072,7 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 		// only one service deploy was allowed
 		d, err := c.deployTaskStore.GetServerlessDeployByRepID(ctx, m.Repository.ID)
 		if err != nil {
-			return -1, fmt.Errorf("fail to get deploy, %w", err)
+			return -1, fmt.Errorf("failed to get deploy, %w", err)
 		}
 		if d != nil {
 			return d.ID, nil
@@ -1085,7 +1091,7 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 
 	varStr, err := c.buildVariables(req, frame)
 	if err != nil {
-		return -1, fmt.Errorf("fail to generate variables, %w", err)
+		return -1, fmt.Errorf("failed to generate variables, %w", err)
 	}
 
 	// put repo-type and namespace/name in annotation
@@ -1098,6 +1104,18 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 		return -1, errorx.InternalServerError(err, nil)
 	}
 
+	billingUUID := user.UUID
+	ownerNamespace := deployReq.CurrentUser
+	if req.OwnerNamespace != "" {
+		// Caller explicitly requested inference to be under this namespace (user or org).
+		ownerNamespace = req.OwnerNamespace
+		resolved, err := c.repoComponent.GetNamespaceBillingUUID(ctx, ownerNamespace)
+		if err != nil {
+			return -1, fmt.Errorf("failed to resolve billing UUID for namespace %s, error: %w", ownerNamespace, err)
+		}
+		billingUUID = resolved
+	}
+
 	resource, err := c.spaceResourceStore.FindByID(ctx, req.ResourceID)
 	if err != nil {
 		return -1, fmt.Errorf("cannot find resource, %w", err)
@@ -1105,21 +1123,17 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 
 	req.ClusterID = resource.ClusterID
 
-	// resource available only if err is nil, err message should contain
-	// the reason why resource is unavailable
-	err = c.repoComponent.CheckAccountAndResource(ctx, deployReq.CurrentUser, req.ClusterID, req.OrderDetailID, resource)
+	exclusiveResp, err := c.repoComponent.CheckAccountAndResource(ctx, ownerNamespace, req.ClusterID, req.OrderDetailID, resource)
 	if err != nil {
 		return -1, err
 	}
 
-	// choose image
 	var hardware types.HardWare
 	err = json.Unmarshal([]byte(resource.Resources), &hardware)
 	if err != nil {
 		return -1, errorx.InternalServerError(err, nil)
 	}
 
-	// only vllm and sglang support multi-host inference
 	if hardware.Replicas > 1 {
 		frameNameLower := strings.ToLower(frame.FrameName)
 		if !strings.Contains(frameNameLower, "vllm") && !strings.Contains(frameNameLower, "sglang") {
@@ -1130,8 +1144,7 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 		}
 	}
 
-	// create deploy for model
-	dp := types.DeployRepo{
+	dp := types.DeployRequest{
 		DeployName:       req.DeployName,
 		SpaceID:          0,
 		Path:             m.Repository.Path,
@@ -1143,19 +1156,24 @@ func (c *modelComponentImpl) Deploy(ctx context.Context, deployReq types.DeployA
 		ModelID:          m.ID,
 		RepoID:           m.Repository.ID,
 		RuntimeFramework: frame.FrameName,
-		ContainerPort:    frame.ContainerPort, // default container port
-		ImageID:          frame.FrameImage,    // do not need build pod image for model
+		ContainerPort:    frame.ContainerPort,
+		ImageID:          frame.FrameImage,
 		MinReplica:       req.MinReplica,
 		MaxReplica:       req.MaxReplica,
 		Annotation:       string(annoStr),
 		ClusterID:        req.ClusterID,
 		SecureLevel:      req.SecureLevel,
 		Type:             deployReq.DeployType,
-		UserUUID:         user.UUID,
+		UserUUID:         billingUUID,
 		SKU:              strconv.FormatInt(resource.ID, 10),
 		Task:             task,
 		Variables:        varStr,
 		EngineArgs:       req.EngineArgs,
+		OwnerNamespace:   ownerNamespace,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: exclusiveResp.NodeAffinity,
+			Tolerations:  exclusiveResp.Tolerations,
+		},
 	}
 	dp = modelRunUpdateDeployRepo(dp, req)
 	return c.deployer.Deploy(ctx, dp)
@@ -1170,13 +1188,15 @@ func (c *modelComponentImpl) Wakeup(ctx context.Context, namespace, name string,
 	// get Deploy for inference
 	deploy, err := c.deployTaskStore.GetDeployByID(ctx, deployId)
 	if err != nil {
-		return fmt.Errorf("can't get inference delopyment,%w", err)
+		return fmt.Errorf("can't get inference deployment,%w", err)
 	}
-	return c.deployer.Wakeup(ctx, types.DeployRepo{
+	return c.deployer.Wakeup(ctx, types.DeployRequest{
 		DeployID:  deployId,
 		Namespace: namespace,
 		Name:      name,
 		SvcName:   deploy.SvcName,
+		Endpoint:  deploy.Endpoint,
+		ClusterID: deploy.ClusterID,
 	})
 }
 

@@ -15,10 +15,15 @@ import (
 type UserSvcClient interface {
 	GetMemberRole(ctx context.Context, orgName, userName string) (membership.Role, error)
 	GetNameSpaceInfo(ctx context.Context, path string) (*Namespace, error)
+	GetNameSpaceInfoByUUID(ctx context.Context, uuid string) (*Namespace, error)
 	GetUserInfo(ctx context.Context, userName, visitorName string) (*User, error)
 	GetOrCreateFirstAvaiTokens(ctx context.Context, userName, visitorName, app, tokenName string) (string, error)
 	VerifyByAccessToken(ctx context.Context, token string) (*types.CheckAccessTokenResp, error)
 	GetUserByName(ctx context.Context, userName string) (*types.User, error)
+	GetUserByUUID(ctx context.Context, userUUID string) (*types.User, error)
+	GetOrgByName(ctx context.Context, orgName string) (*types.Organization, error)
+	GetOrgByUUID(ctx context.Context, orgUUID string) (*types.Organization, error)
+	GetMemberRoleByUUID(ctx context.Context, orgUUID, userName string) (membership.Role, error)
 	FindByUUIDs(ctx context.Context, uuids []string) (map[string]*types.User, error)
 	GetUserUUIDs(ctx context.Context, per, page int) ([]string, int, error)
 	GetEmails(ctx context.Context, per, page int) ([]string, int, error)
@@ -72,6 +77,23 @@ func (c *UserSvcHttpClient) GetNameSpaceInfo(ctx context.Context, path string) (
 				Set("service", "user service").
 				Set("action", "get namespace info").
 				Set("path", path))
+	}
+
+	return r.Data.(*Namespace), nil
+}
+
+func (c *UserSvcHttpClient) GetNameSpaceInfoByUUID(ctx context.Context, uuid string) (*Namespace, error) {
+	url := fmt.Sprintf("/api/v1/namespace/uuid/%s", uuid)
+	var r httpbase.R
+	r.Data = &Namespace{}
+	err := c.hc.Get(ctx, url, &r)
+	if err != nil {
+		slog.ErrorContext(ctx, "call user service failed", slog.String("error", err.Error()))
+		return nil, errorx.RemoteSvcFail(err,
+			errorx.Ctx().
+				Set("service", "user service").
+				Set("action", "get namespace info by uuid").
+				Set("uuid", uuid))
 	}
 
 	return r.Data.(*Namespace), nil
@@ -143,6 +165,78 @@ func (c *UserSvcHttpClient) GetUserByName(ctx context.Context, userName string) 
 	}
 
 	return r.Data.(*types.User), nil
+}
+
+func (c *UserSvcHttpClient) GetUserByUUID(ctx context.Context, userUUID string) (*types.User, error) {
+	url := fmt.Sprintf("/api/v1/user/%s?type=uuid", userUUID)
+	var r httpbase.R
+	r.Data = &types.User{}
+	err := c.hc.Get(ctx, url, &r)
+	if err != nil {
+		slog.ErrorContext(ctx, "call user service failed", slog.String("error", err.Error()))
+		return nil, errorx.RemoteSvcFail(err,
+			errorx.Ctx().
+				Set("service", "user service").
+				Set("action", "get user by uuid").
+				Set("userUUID", userUUID))
+	}
+	return r.Data.(*types.User), nil
+}
+
+func (c *UserSvcHttpClient) GetOrgByName(ctx context.Context, orgName string) (*types.Organization, error) {
+	url := fmt.Sprintf("/api/v1/organization/%s", orgName)
+	var r httpbase.R
+	r.Data = &types.Organization{}
+	err := c.hc.Get(ctx, url, &r)
+	if err != nil {
+		slog.ErrorContext(ctx, "call user service failed", slog.String("error", err.Error()))
+		return nil, errorx.RemoteSvcFail(err,
+			errorx.Ctx().
+				Set("service", "user service").
+				Set("action", "get org by name").
+				Set("orgName", orgName))
+	}
+
+	return r.Data.(*types.Organization), nil
+}
+
+func (c *UserSvcHttpClient) GetOrgByUUID(ctx context.Context, orgUUID string) (*types.Organization, error) {
+	url := fmt.Sprintf("/api/v1/organization/uuid/%s", orgUUID)
+	var r httpbase.R
+	r.Data = &types.Organization{}
+	err := c.hc.Get(ctx, url, &r)
+	if err != nil {
+		slog.ErrorContext(ctx, "call user service failed", slog.String("error", err.Error()))
+		return nil, errorx.RemoteSvcFail(err,
+			errorx.Ctx().
+				Set("service", "user service").
+				Set("action", "get org by uuid").
+				Set("orgUUID", orgUUID))
+	}
+
+	return r.Data.(*types.Organization), nil
+}
+
+func (c *UserSvcHttpClient) GetMemberRoleByUUID(ctx context.Context, orgUUID, userName string) (membership.Role, error) {
+	url := fmt.Sprintf("/api/v1/organization/uuid/%s/members/%s?current_user=%s", orgUUID, userName, userName)
+	var r httpbase.R
+	r.Data = membership.RoleUnknown
+	err := c.hc.Get(ctx, url, &r)
+	if err != nil {
+		slog.ErrorContext(ctx, "call user service failed", slog.String("error", err.Error()))
+		return membership.RoleUnknown, errorx.RemoteSvcFail(err,
+			errorx.Ctx().
+				Set("service", "user service").
+				Set("action", "get member role by uuid").
+				Set("orgUUID", orgUUID).
+				Set("userName", userName))
+	}
+
+	role, ok := r.Data.(string)
+	if !ok {
+		return membership.RoleUnknown, errorx.InternalServerError(fmt.Errorf("failed to convert r.Data '%v' to membership.Role", r.Data), nil)
+	}
+	return membership.Role(role), nil
 }
 
 func (c *UserSvcHttpClient) FindByUUIDs(ctx context.Context, uuids []string) (map[string]*types.User, error) {

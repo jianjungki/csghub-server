@@ -355,7 +355,7 @@ func (c *repoComponentImpl) checkDeployPermissionForServerless(ctx context.Conte
 	return &user, deploy, nil
 }
 
-func (c *repoComponentImpl) ListDeploy(ctx context.Context, repoType types.RepositoryType, namespace, name, currentUser string) ([]types.DeployRepo, error) {
+func (c *repoComponentImpl) ListDeploy(ctx context.Context, repoType types.RepositoryType, namespace, name, currentUser string) ([]types.DeployRequest, error) {
 	user, err := c.userStore.FindByUsername(ctx, currentUser)
 	if err != nil {
 		return nil, errors.New("user does not exist")
@@ -373,9 +373,9 @@ func (c *repoComponentImpl) ListDeploy(ctx context.Context, repoType types.Repos
 	if err != nil {
 		return nil, errors.New("fail to list user deploys")
 	}
-	var resDeploys []types.DeployRepo
+	var resDeploys []types.DeployRequest
 	for _, deploy := range deploys {
-		resDeploys = append(resDeploys, types.DeployRepo{
+		resDeploys = append(resDeploys, types.DeployRequest{
 			DeployID:         deploy.ID,
 			DeployName:       deploy.DeployName,
 			RepoID:           deploy.RepoID,
@@ -421,7 +421,7 @@ func (c *repoComponentImpl) DeleteDeploy(ctx context.Context, delReq types.Deplo
 	}
 
 	// delete service
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		SpaceID:   0,
 		DeployID:  delReq.DeployID,
 		Namespace: delReq.Namespace,
@@ -474,7 +474,7 @@ func (c *repoComponentImpl) DeleteDeploy(ctx context.Context, delReq types.Deplo
 	return err
 }
 
-func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.DeployActReq) (*types.DeployRepo, error) {
+func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.DeployActReq) (*types.DeployRequest, error) {
 	var (
 		deploy *database.Deploy
 		err    error
@@ -488,7 +488,7 @@ func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.De
 		return nil, err
 	}
 
-	req := types.DeployRepo{
+	req := types.DeployRequest{
 		DeployID:  deploy.ID,
 		SpaceID:   deploy.SpaceID,
 		ModelID:   deploy.ModelID,
@@ -502,7 +502,7 @@ func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.De
 		slog.Warn("fail to get deploy replica", slog.Any("repotype", detailReq.RepoType), slog.Any("req", req), slog.Any("error", err))
 	}
 
-	_, code, _, err := c.deployer.Status(ctx, types.DeployRepo{
+	_, code, _, err := c.deployer.Status(ctx, types.DeployRequest{
 		DeployID:  deploy.ID,
 		SpaceID:   deploy.SpaceID,
 		ModelID:   deploy.ModelID,
@@ -539,7 +539,7 @@ func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.De
 	// Check if engine_args contains tool-call-parser parameter
 	supportFunctionCall := strings.Contains(deploy.EngineArgs, "tool-call-parser")
 
-	resDeploy := types.DeployRepo{
+	resDeploy := types.DeployRequest{
 		DeployID:            deploy.ID,
 		DeployName:          deploy.DeployName,
 		RepoID:              deploy.RepoID,
@@ -577,6 +577,7 @@ func (c *repoComponentImpl) DeployDetail(ctx context.Context, detailReq types.De
 }
 
 func deployStatusCodeToString(code int) string {
+	// Pending    = 0
 	// DeployBuildPending    = 10
 	// DeployBuildInProgress = 11
 	// DeployBuildFailed     = 12
@@ -593,6 +594,8 @@ func deployStatusCodeToString(code int) string {
 	// simplified status for frontend show
 	var txt string
 	switch code {
+	case 0:
+		txt = SpaceStatusPending
 	case 10:
 		txt = SpaceStatusBuilding // need to change it to queue? This requires UI modification as well
 	case 11:
@@ -617,6 +620,8 @@ func deployStatusCodeToString(code int) string {
 		txt = SpaceStatusStopped
 	case 27:
 		txt = RepoStatusDeleted
+	case 28:
+		txt = ResourceUnhealthy
 	default:
 		txt = SpaceStatusStopped
 	}
@@ -637,7 +642,7 @@ func (c *repoComponentImpl) DeployInstanceLogs(ctx context.Context, logReq types
 	if err != nil {
 		return nil, err
 	}
-	return c.deployer.InstanceLogs(ctx, types.DeployRepo{
+	return c.deployer.InstanceLogs(ctx, types.DeployRequest{
 		DeployID:     deploy.ID,
 		SpaceID:      deploy.SpaceID,
 		ModelID:      deploy.ModelID,
@@ -698,7 +703,7 @@ func (c *repoComponentImpl) DeployStop(ctx context.Context, stopReq types.Deploy
 	}
 
 	// delete service
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:      stopReq.DeployID,
 		SpaceID:       deploy.SpaceID,
 		ModelID:       deploy.ModelID,
@@ -768,7 +773,7 @@ func (c *repoComponentImpl) DeployStatus(ctx context.Context, repoType types.Rep
 		return status, err
 	}
 	// request deploy status by deploy id
-	_, code, instances, err := c.deployer.Status(ctx, types.DeployRepo{
+	_, code, instances, err := c.deployer.Status(ctx, types.DeployRequest{
 		DeployID:  deploy.ID,
 		SpaceID:   deploy.SpaceID,
 		ModelID:   deploy.ModelID,
@@ -826,9 +831,19 @@ func (c *repoComponentImpl) DeployUpdate(ctx context.Context, updateReq types.De
 		if err != nil {
 			return fmt.Errorf("cannot find available resource, %w", err)
 		}
-		err = c.CheckAccountAndResource(ctx, updateReq.CurrentUser, resource.ClusterID, deploy.OrderDetailID, resource)
+		billingNamespace := deploy.OwnerNamespace
+		if billingNamespace == "" {
+			billingNamespace = updateReq.CurrentUser
+		}
+		exclusiveResp, err := c.CheckAccountAndResource(ctx, billingNamespace, resource.ClusterID, deploy.OrderDetailID, resource)
 		if err != nil {
 			return err
+		}
+		req.NodeAffinity = exclusiveResp.NodeAffinity
+		req.Tolerations = exclusiveResp.Tolerations
+		// update deploy's cluster_id together with resource_id (same as notebook update)
+		if req.ClusterID == nil {
+			req.ClusterID = &resource.ClusterID
 		}
 		if req.RuntimeFrameworkID == nil {
 			frame, err := c.runtimeFrameworksStore.FindEnabledByName(ctx, deploy.RuntimeFramework)
@@ -848,7 +863,7 @@ func (c *repoComponentImpl) DeployUpdate(ctx context.Context, updateReq types.De
 	}
 
 	// check service
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  updateReq.DeployID,
 		SpaceID:   deploy.SpaceID,
 		ModelID:   deploy.ModelID,
@@ -911,14 +926,19 @@ func (c *repoComponentImpl) DeployStart(ctx context.Context, startReq types.Depl
 	if err != nil {
 		return fmt.Errorf("failed to find resource, %w", err)
 	}
-	// check resource available
-	err = c.CheckAccountAndResource(ctx, startReq.CurrentUser, deploy.ClusterID, deploy.OrderDetailID, resource)
+	billingNamespace := deploy.OwnerNamespace
+	if billingNamespace == "" {
+		billingNamespace = startReq.CurrentUser
+	}
+	exclusiveResp, err := c.CheckAccountAndResource(ctx, billingNamespace, deploy.ClusterID, deploy.OrderDetailID, resource)
 	if err != nil {
 		return err
 	}
+	deploy.NodeAffinity = exclusiveResp.NodeAffinity
+	deploy.Tolerations = exclusiveResp.Tolerations
 
 	// check service
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  startReq.DeployID,
 		SpaceID:   deploy.SpaceID,
 		ModelID:   deploy.ModelID,

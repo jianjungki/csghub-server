@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"opencsg.com/csghub-server/api/httpbase"
 	"opencsg.com/csghub-server/common/config"
+	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 	"opencsg.com/csghub-server/common/utils/common"
 	"opencsg.com/csghub-server/component"
@@ -41,6 +44,22 @@ func NewOrganizationHandler(config *config.Config) (*OrganizationHandler, error)
 	if err != nil {
 		return nil, err
 	}
+	ftc, err := component.NewFinetuneComponent(config)
+	if err != nil {
+		return nil, err
+	}
+	ec, err := component.NewEvaluationComponent(config)
+	if err != nil {
+		return nil, err
+	}
+	uc, err := component.NewUserComponent(config)
+	if err != nil {
+		return nil, err
+	}
+	skc, err := component.NewSkillComponent(config)
+	if err != nil {
+		return nil, err
+	}
 	return &OrganizationHandler{
 		space:      sc,
 		code:       cc,
@@ -49,6 +68,10 @@ func NewOrganizationHandler(config *config.Config) (*OrganizationHandler, error)
 		collection: colc,
 		prompt:     pc,
 		mcp:        mcp,
+		finetune:   ftc,
+		evaluation: ec,
+		user:       uc,
+		skill:      skc,
 	}, nil
 }
 
@@ -60,6 +83,10 @@ type OrganizationHandler struct {
 	collection component.CollectionComponent
 	prompt     component.PromptComponent
 	mcp        component.MCPServerComponent
+	finetune   component.FinetuneComponent
+	evaluation component.EvaluationComponent
+	user       component.UserComponent
+	skill      component.SkillComponent
 }
 
 // GetOrganizationModels godoc
@@ -365,4 +392,229 @@ func (h *OrganizationHandler) MCPServers(ctx *gin.Context) {
 		"total": total,
 	}
 	httpbase.OK(ctx, respData)
+}
+
+// GetOrganizationFinetunes godoc
+// @Security     ApiKey
+// @Summary      Get organization finetune jobs
+// @Description  get organization finetune jobs
+// @Tags         Organization
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "org name"
+// @Param        per query int false "page size"
+// @Param        page query int false "current page number"
+// @Success      200  {object}  types.ResponseWithTotal{data=[]types.ArgoWorkFlowRes,total=int} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /organization/{namespace}/finetunes [get]
+func (h *OrganizationHandler) Finetunes(ctx *gin.Context) {
+	var req types.OrgFinetunesReq
+	req.Namespace = ctx.Param("namespace")
+	req.CurrentUser = httpbase.GetCurrentUser(ctx)
+
+	per, page, err := common.GetPerAndPageFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	req.Page = page
+	req.PageSize = per
+	data, total, err := h.finetune.OrgFinetunes(ctx.Request.Context(), &req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get org finetunes", slog.Any("error", err))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+
+	respData := gin.H{
+		"data":  data,
+		"total": total,
+	}
+	httpbase.OK(ctx, respData)
+}
+
+// GetOrganizationEvaluations godoc
+// @Security     ApiKey
+// @Summary      Get organization evaluation jobs
+// @Description  get organization evaluation jobs
+// @Tags         Organization
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "org name"
+// @Param        per query int false "page size"
+// @Param        page query int false "current page number"
+// @Success      200  {object}  types.ResponseWithTotal{data=[]types.ArgoWorkFlowRes,total=int} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /organization/{namespace}/evaluations [get]
+func (h *OrganizationHandler) Evaluations(ctx *gin.Context) {
+	var req types.OrgEvaluationsReq
+	req.Namespace = ctx.Param("namespace")
+	req.CurrentUser = httpbase.GetCurrentUser(ctx)
+
+	per, page, err := common.GetPerAndPageFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	req.Page = page
+	req.PageSize = per
+	data, total, err := h.evaluation.OrgEvaluations(ctx.Request.Context(), &req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get org evaluations", slog.Any("error", err))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+
+	respData := gin.H{
+		"data":  data,
+		"total": total,
+	}
+	httpbase.OK(ctx, respData)
+}
+
+// RunDeploys godoc
+// @Security     ApiKey
+// @Summary      Get organization run deploys (e.g. inference)
+// @Description  get organization run deploys by deploy type (0-space, 1-inference, 2-finetune)
+// @Tags         Organization
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "org name"
+// @Param        repo_type path string true "model or space" Enums(model,space)
+// @Param        deploy_type query int false "deploy type (0-space, 1-inference, 2-finetune)" default(1)
+// @Param        per query int false "page size"
+// @Param        page query int false "current page number"
+// @Success      200  {object}  types.ResponseWithTotal{data=[]types.DeployRequest,total=int} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /organization/{namespace}/run/{repo_type} [get]
+func (h *OrganizationHandler) RunDeploys(ctx *gin.Context) {
+	deployTypeStr := ctx.Query("deploy_type")
+	if deployTypeStr == "" {
+		deployTypeStr = strconv.Itoa(types.InferenceType)
+	}
+	deployType, err := strconv.Atoi(deployTypeStr)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request deploy type format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	per, page, err := common.GetPerAndPageFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	repoType := common.RepoTypeFromParam(ctx)
+	if repoType != types.ModelRepo && repoType != types.SpaceRepo {
+		slog.ErrorContext(ctx.Request.Context(), "Invalid repo type", "repo_type", repoType)
+		httpbase.BadRequestWithExt(ctx, errorx.ReqParamInvalid(errors.New("Invalid repo type"), nil))
+		return
+	}
+	var req types.OrgRunDeploysReq
+	req.Namespace = ctx.Param("namespace")
+	req.CurrentUser = httpbase.GetCurrentUser(ctx)
+	req.Page = page
+	req.PageSize = per
+	req.RepoType = repoType
+	req.DeployType = deployType
+	data, total, err := h.user.ListDeploysByNamespace(ctx.Request.Context(), &req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get org run deploys", slog.Any("error", err))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+	respData := gin.H{
+		"data":  data,
+		"total": total,
+	}
+	httpbase.OK(ctx, respData)
+}
+
+// Notebooks godoc
+// @Security     ApiKey
+// @Summary      Get organization notebooks
+// @Description  get organization notebooks
+// @Tags         Organization
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "org name"
+// @Param        per query int false "page size"
+// @Param        page query int false "current page number"
+// @Success      200  {object}  types.ResponseWithTotal{data=[]types.NotebookRes,total=int} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /organization/{namespace}/notebooks [get]
+func (h *OrganizationHandler) Notebooks(ctx *gin.Context) {
+	var req types.OrgNotebooksReq
+	req.Namespace = ctx.Param("namespace")
+	req.CurrentUser = httpbase.GetCurrentUser(ctx)
+	per, page, err := common.GetPerAndPageFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	req.Page = page
+	req.PageSize = per
+	data, total, err := h.user.ListNotebooksByNamespace(ctx.Request.Context(), &req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get org notebooks", slog.Any("error", err))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+	respData := gin.H{
+		"data":  data,
+		"total": total,
+	}
+	httpbase.OK(ctx, respData)
+}
+
+// GetOrganizationSkills godoc
+// @Security     ApiKey
+// @Summary      Get organization skills
+// @Description  get organization skills
+// @Tags         Organization
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "org name"
+// @Param        current_user query string true "current user name"
+// @Param        per query int false "page size"
+// @Param        page query int false "current page number"
+// @Success      200  {object}  types.ResponseWithTotal{data=[]types.Skill,total=int} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /organization/{namespace}/skills [get]
+func (h *OrganizationHandler) Skills(ctx *gin.Context) {
+	var req types.OrgSkillsReq
+	req.Namespace = ctx.Param("namespace")
+	req.CurrentUser = httpbase.GetCurrentUser(ctx)
+
+	per, page, err := common.GetPerAndPageFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	req.Page = page
+	req.PageSize = per
+	skills, total, err := h.skill.OrgSkills(ctx.Request.Context(), &req)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Failed to get org skills", slog.Any("error", err))
+		httpbase.ServerError(ctx, err)
+		return
+	}
+
+	slog.Info("Get org skills succeed", slog.String("org", req.Namespace))
+
+	respData := gin.H{
+		"message": "OK",
+		"data":    skills,
+		"total":   total,
+	}
+	ctx.JSON(http.StatusOK, respData)
 }

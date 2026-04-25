@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"time"
 
+	"opencsg.com/csghub-server/builder/rpc"
+
 	"github.com/gin-gonic/gin"
 	"opencsg.com/csghub-server/aigateway/component"
 	"opencsg.com/csghub-server/aigateway/token"
@@ -21,16 +23,16 @@ type nonStreamResponseWriter struct {
 	internalWritter     gin.ResponseWriter
 	moderationComponent component.Moderation
 	tokenCounter        token.ChatTokenCounter
+	recorder            component.LLMLogRecorder
 	buffer              bytes.Buffer
-	hasProcessed        bool
 }
 
-func newNonStreamResponseWriter(internalWritter gin.ResponseWriter, moderationComponent component.Moderation, tokenCounter token.ChatTokenCounter) *nonStreamResponseWriter {
+func newNonStreamResponseWriter(internalWritter gin.ResponseWriter, moderationComponent component.Moderation, tokenCounter token.ChatTokenCounter, recorder component.LLMLogRecorder) *nonStreamResponseWriter {
 	return &nonStreamResponseWriter{
 		internalWritter:     internalWritter,
 		moderationComponent: moderationComponent,
 		tokenCounter:        tokenCounter,
-		hasProcessed:        false,
+		recorder:            recorder,
 	}
 }
 
@@ -39,6 +41,7 @@ func (nsw *nonStreamResponseWriter) Header() http.Header {
 }
 
 func (nsw *nonStreamResponseWriter) WriteHeader(statusCode int) {
+	nsw.internalWritter.Header().Del("Content-Length")
 	nsw.internalWritter.WriteHeader(statusCode)
 }
 
@@ -86,6 +89,9 @@ func (nsw *nonStreamResponseWriter) nonStreamWrite(originData []byte) (int, erro
 	if nsw.tokenCounter != nil {
 		nsw.tokenCounter.Completion(completion)
 	}
+	if nsw.recorder != nil {
+		nsw.recorder.Completion(completion)
+	}
 
 	// Step 5: Handle case with empty choices array
 	if len(completion.Choices) == 0 {
@@ -95,12 +101,12 @@ func (nsw *nonStreamResponseWriter) nonStreamWrite(originData []byte) (int, erro
 	// Step 6: Perform content moderation if service is available
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := nsw.moderationComponent.CheckChatNonStreamResponse(ctx, completion)
 
+	result, err := nsw.CheckChatNonStreamResponse(ctx, completion)
 	if err != nil {
 		slog.Error("NonStreamResponseWriter nonStreamWrite failed to call moderation service", slog.Any("err", err))
 		// Continue with original content if moderation service fails
-	} else if result.IsSensitive {
+	} else if result != nil && result.IsSensitive {
 		// Replace sensitive content with block message
 		slog.Debug("NonStreamResponseWriter nonStreamWrite checkresult is sensitive",
 			slog.Any("content", completion),
@@ -115,6 +121,13 @@ func (nsw *nonStreamResponseWriter) nonStreamWrite(originData []byte) (int, erro
 
 	// Step 7: Write original data to internal writer
 	return originLen, nsw.writeToInternal(nsw.buffer.Bytes())
+}
+
+func (nsw *nonStreamResponseWriter) CheckChatNonStreamResponse(ctx context.Context, completion types.ChatCompletion) (*rpc.CheckResult, error) {
+	if nsw.moderationComponent == nil {
+		return nil, nil
+	}
+	return nsw.moderationComponent.CheckChatNonStreamResponse(ctx, completion)
 }
 
 // writeToInternal encapsulates writing to the internal writer with error logging and buffer cleanup

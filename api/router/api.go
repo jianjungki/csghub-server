@@ -239,6 +239,13 @@ func NewRouter(config *config.Config, enableSwagger bool) (*gin.Engine, error) {
 	// Code routes
 	createCodeRoutes(config, apiGroup, middlewareCollection, codeHandler, repoCommonHandler)
 
+	skillHandler, err := handler.NewSkillHandler(config)
+	if err != nil {
+		return nil, fmt.Errorf("error creating skill handler:%w", err)
+	}
+	// Skill routes
+	createSkillRoutes(config, apiGroup, middlewareCollection, skillHandler, repoCommonHandler)
+
 	spaceHandler, err := handler.NewSpaceHandler(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating space handler:%w", err)
@@ -384,20 +391,9 @@ func NewRouter(config *config.Config, enableSwagger bool) (*gin.Engine, error) {
 		collections.PUT("/:id/repos/:repo_id", middlewareCollection.Auth.NeedLogin, collectionHandler.UpdateCollectionRepo)
 	}
 
-	// cluster infos
-	clusterHandler, err := handler.NewClusterHandler(config)
+	err = createClusterRoutes(apiGroup, middlewareCollection, config)
 	if err != nil {
-		return nil, fmt.Errorf("fail to creating cluster handler: %w", err)
-	}
-	cluster := apiGroup.Group("/cluster")
-	{
-		cluster.GET("", middlewareCollection.Auth.NeedLogin, clusterHandler.Index)
-		cluster.GET("/usage", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetClusterUsage)
-		cluster.GET("/deploys", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetDeploys)
-		cluster.GET("/deploys_report", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetDeploysReport)
-		cluster.GET("/:id", middlewareCollection.Auth.NeedLogin, clusterHandler.GetClusterById)
-		cluster.PUT("/:id", middlewareCollection.Auth.NeedAdmin, clusterHandler.Update)
-		cluster.GET("/public", clusterHandler.GetClusterPublic)
+		return nil, fmt.Errorf("error creating cluster routes:%w", err)
 	}
 
 	eventHandler, err := handler.NewEventHandler()
@@ -631,6 +627,8 @@ func createModelRoutes(config *config.Config,
 	// Models repo operation routes
 	{
 		modelsGroup.GET("/:namespace/:name/branches", repoCommonHandler.Branches)
+		modelsGroup.POST("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.CreateBranch)
+		modelsGroup.DELETE("/:namespace/:name/branches/:branch", middleware.MustLogin(), repoCommonHandler.DeleteBranch)
 		modelsGroup.GET("/:namespace/:name/tags", repoCommonHandler.Tags)
 		modelsGroup.POST("/:namespace/:name/preupload/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.Preupload)
 		// update tags of a certain category
@@ -669,6 +667,8 @@ func createModelRoutes(config *config.Config,
 		modelsGroup.PUT("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateMirror)
 		modelsGroup.DELETE("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeleteMirror)
 		modelsGroup.POST("/:namespace/:name/mirror/sync", middlewareCollection.Auth.NeedLogin, repoCommonHandler.SyncMirror)
+		// Get repo size by branch
+		modelsGroup.GET("/:namespace/:name/size/:branch", repoCommonHandler.GetRepoSizeByBranch)
 		// runtime framework
 		modelsGroup.GET("/:namespace/:name/runtime_framework", repoCommonHandler.RuntimeFrameworkList)
 		modelsGroup.GET("/:namespace/:name/runtime_framework_v2", repoCommonHandler.RuntimeFrameworkListV2)
@@ -699,6 +699,8 @@ func createModelRoutes(config *config.Config,
 
 		// deploy model as finetune instance
 		modelsDeployGroup.POST("/:namespace/:name/finetune", modelHandler.FinetuneCreate)
+		// update finetune instance (resource_id and cluster_id)
+		modelsDeployGroup.PUT("/:namespace/:name/finetune/:id", modelHandler.FinetuneUpdate)
 		// stop a finetune instance
 		modelsDeployGroup.PUT("/:namespace/:name/finetune/:id/stop", modelHandler.FinetuneStop)
 		// start a finetune instance
@@ -772,7 +774,10 @@ func createDatasetRoutes(
 		datasetsGroup.DELETE("/:namespace/:name", middleware.MustLogin(), dsHandler.Delete)
 		datasetsGroup.GET("/:namespace/:name", cache.Cache(memoryStore, time.Minute*2, middleware.CacheRepoInfo()), dsHandler.Show)
 		datasetsGroup.GET("/:namespace/:name/relations", middleware.MustLogin(), dsHandler.Relations)
+
 		datasetsGroup.GET("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.Branches)
+		datasetsGroup.POST("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.CreateBranch)
+		datasetsGroup.DELETE("/:namespace/:name/branches/:branch", middleware.MustLogin(), repoCommonHandler.DeleteBranch)
 		datasetsGroup.GET("/:namespace/:name/tags", middleware.MustLogin(), repoCommonHandler.Tags)
 		datasetsGroup.POST("/:namespace/:name/preupload/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.Preupload)
 		// update tags of a certain category
@@ -803,6 +808,8 @@ func createDatasetRoutes(
 		datasetsGroup.PUT("/:namespace/:name/mirror", middleware.MustLogin(), repoCommonHandler.UpdateMirror)
 		datasetsGroup.DELETE("/:namespace/:name/mirror", middleware.MustLogin(), repoCommonHandler.DeleteMirror)
 		datasetsGroup.POST("/:namespace/:name/mirror/sync", middleware.MustLogin(), repoCommonHandler.SyncMirror) // TODO: check license
+		// Get repo size by branch
+		datasetsGroup.GET("/:namespace/:name/size/:branch", repoCommonHandler.GetRepoSizeByBranch)
 	}
 }
 
@@ -823,6 +830,8 @@ func createCodeRoutes(
 		codesGroup.GET("/:namespace/:name", codeHandler.Show)
 		codesGroup.GET("/:namespace/:name/relations", codeHandler.Relations)
 		codesGroup.GET("/:namespace/:name/branches", repoCommonHandler.Branches)
+		codesGroup.POST("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.CreateBranch)
+		codesGroup.DELETE("/:namespace/:name/branches/:branch", middleware.MustLogin(), repoCommonHandler.DeleteBranch)
 		codesGroup.GET("/:namespace/:name/tags", repoCommonHandler.Tags)
 		codesGroup.POST("/:namespace/:name/preupload/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.Preupload)
 
@@ -854,6 +863,8 @@ func createCodeRoutes(
 		codesGroup.PUT("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateMirror)
 		codesGroup.DELETE("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeleteMirror)
 		codesGroup.POST("/:namespace/:name/mirror/sync", middlewareCollection.Auth.NeedLogin, repoCommonHandler.SyncMirror)
+		// Get repo size by branch
+		codesGroup.GET("/:namespace/:name/size/:branch", repoCommonHandler.GetRepoSizeByBranch)
 	}
 }
 
@@ -889,6 +900,7 @@ func createSpaceRoutes(config *config.Config,
 	repoCommonHandler *handler.RepoHandler,
 	monitorHandler *handler.MonitorHandler) {
 	spaces := apiGroup.Group("/spaces")
+	spaces.GET("/cuda-versions", spaceHandler.GetSupportedCUDAVersions)
 	spaces.Use(middleware.RepoType(types.SpaceRepo), middlewareCollection.Repo.RepoExists)
 	{
 		// list all spaces
@@ -898,7 +910,6 @@ func createSpaceRoutes(config *config.Config,
 		spaces.GET("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Show)
 		spaces.PUT("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Update)
 		// get supported cuda versions
-		spaces.GET("/:namespace/:name/cuda-versions/:resource_type", middlewareCollection.Auth.NeedLogin, spaceHandler.GetSupportedCUDAVersions)
 		spaces.DELETE("/:namespace/:name", middlewareCollection.Auth.NeedLogin, spaceHandler.Delete)
 		// depoly and start running the space
 		spaces.POST("/:namespace/:name/run", middlewareCollection.Auth.NeedLogin, spaceHandler.Run)
@@ -915,6 +926,8 @@ func createSpaceRoutes(config *config.Config,
 	}
 	{
 		spaces.GET("/:namespace/:name/branches", repoCommonHandler.Branches)
+		spaces.POST("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.CreateBranch)
+		spaces.DELETE("/:namespace/:name/branches/:branch", middleware.MustLogin(), repoCommonHandler.DeleteBranch)
 		spaces.GET("/:namespace/:name/tags", repoCommonHandler.Tags)
 		spaces.POST("/:namespace/:name/preupload/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.Preupload)
 		// update tags of a certain category
@@ -944,6 +957,8 @@ func createSpaceRoutes(config *config.Config,
 		spaces.PUT("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateMirror)
 		spaces.DELETE("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeleteMirror)
 		spaces.POST("/:namespace/:name/mirror/sync", middlewareCollection.Auth.NeedLogin, repoCommonHandler.SyncMirror)
+		// Get repo size by branch
+		spaces.GET("/:namespace/:name/size/:branch", repoCommonHandler.GetRepoSizeByBranch)
 		spaces.GET("/:namespace/:name/run", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployList)
 		spaces.GET("/:namespace/:name/run/:id", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployDetail)
 		spaces.GET("/:namespace/:name/run/:id/status", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeployStatus)
@@ -965,6 +980,15 @@ func createSpaceRoutes(config *config.Config,
 }
 
 func createUserRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware.MiddlewareCollection, userProxyHandler *handler.InternalServiceProxyHandler, userHandler *handler.UserHandler) {
+	// api keys
+	keysGroup := apiGroup.Group("/namespaces")
+	keysGroup.Use(middlewareCollection.Auth.NeedLogin)
+	{
+		keysGroup.GET("/:uuid/apikeys", userProxyHandler.Proxy)
+		keysGroup.POST("/:uuid/apikeys", userProxyHandler.Proxy)
+		keysGroup.PUT("/:uuid/apikeys/:id", userProxyHandler.Proxy)
+		keysGroup.DELETE("/:uuid/apikeys/:id", userProxyHandler.Proxy)
+	}
 	// deprecated
 	{
 		apiGroup.POST("/users", userProxyHandler.ProxyToApi("/api/v1/user"))
@@ -996,6 +1020,7 @@ func createUserRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware
 		apiGroup.GET("/user/:username/spaces", userHandler.Spaces)
 		apiGroup.GET("/user/:username/prompts", userHandler.Prompts)
 		apiGroup.GET("/user/:username/mcps", userHandler.MCPServers)
+		apiGroup.GET("/user/:username/skills", userHandler.Skills)
 	}
 
 	{
@@ -1007,6 +1032,7 @@ func createUserRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware
 		apiGroup.GET("/user/:username/likes/models", middlewareCollection.Auth.NeedLogin, userHandler.LikesModels)
 		apiGroup.GET("/user/:username/likes/datasets", middlewareCollection.Auth.NeedLogin, userHandler.LikesDatasets)
 		apiGroup.GET("/user/:username/likes/mcps", middlewareCollection.Auth.NeedLogin, userHandler.LikesMCPServers)
+		apiGroup.GET("/user/:username/likes/skills", middlewareCollection.Auth.NeedLogin, userHandler.LikesSkills)
 	}
 
 	{
@@ -1118,6 +1144,11 @@ func createMappingRoutes(
 			hfMcpserverFileGroup.GET("/:namespace/:name/resolve/:branch/*file_path", middleware.RepoMapping(types.MCPServerRepo), repoCommonHandler.SDKDownload)
 			hfMcpserverFileGroup.HEAD("/:namespace/:name/resolve/:branch/*file_path", middleware.RepoMapping(types.MCPServerRepo), repoCommonHandler.HeadSDKDownload)
 		}
+		hfSkillFileGroup := hfGroup.Group("/skills")
+		{
+			hfSkillFileGroup.GET("/:namespace/:name/resolve/:branch/*file_path", middleware.RepoMapping(types.SkillRepo), repoCommonHandler.SDKDownload)
+			hfSkillFileGroup.HEAD("/:namespace/:name/resolve/:branch/*file_path", middleware.RepoMapping(types.SkillRepo), repoCommonHandler.HeadSDKDownload)
+		}
 		hfAPIGroup := hfGroup.Group("/api")
 		{
 			hfAPIGroup.GET("/whoami-v2", middlewareCollection.Auth.NeedLogin, userHandler.UserPermission)
@@ -1154,6 +1185,11 @@ func createMappingRoutes(
 			{
 				hfMcperverAPIGroup.GET("/:namespace/:name/revision/:ref", middleware.RepoMapping(types.MCPServerRepo), repoCommonHandler.SDKListFiles)
 				hfMcperverAPIGroup.GET("/:namespace/:name", middleware.RepoMapping(types.MCPServerRepo), repoCommonHandler.SDKListFiles)
+			}
+			hfSkillAPIGroup := hfAPIGroup.Group("/skills")
+			{
+				hfSkillAPIGroup.GET("/:namespace/:name/revision/:ref", middleware.RepoMapping(types.SkillRepo), repoCommonHandler.SDKListFiles)
+				hfSkillAPIGroup.GET("/:namespace/:name", middleware.RepoMapping(types.SkillRepo), repoCommonHandler.SDKListFiles)
 			}
 			hfReposAPIGroup := hfAPIGroup.Group("/repos")
 			{
@@ -1332,6 +1368,11 @@ func createOrgRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware.
 		apiGroup.GET("/organization/:namespace/collections", orgHandler.Collections)
 		apiGroup.GET("/organization/:namespace/prompts", orgHandler.Prompts)
 		apiGroup.GET("/organization/:namespace/mcps", orgHandler.MCPServers)
+		apiGroup.GET("/organization/:namespace/finetunes", orgHandler.Finetunes)
+		apiGroup.GET("/organization/:namespace/evaluations", orgHandler.Evaluations)
+		apiGroup.GET("/organization/:namespace/run/:repo_type", orgHandler.RunDeploys)
+		apiGroup.GET("/organization/:namespace/notebooks", orgHandler.Notebooks)
+		apiGroup.GET("/organization/:namespace/skills", orgHandler.Skills)
 	}
 
 	{
@@ -1394,5 +1435,89 @@ func createCustomValidator() error {
 		return nil // Return nil if no error occurred during registration of custom validation functions
 	} else {
 		return fmt.Errorf("fail to register custom validation functions")
+	}
+}
+
+func createClusterRoutes(apiGroup *gin.RouterGroup, middlewareCollection middleware.MiddlewareCollection, config *config.Config) error {
+	// cluster infos
+	clusterHandler, err := handler.NewClusterHandler(config)
+	if err != nil {
+		return fmt.Errorf("fail to creating cluster handler: %w", err)
+	}
+	clusterGrp := apiGroup.Group("/cluster")
+	{
+		clusterGrp.GET("", middlewareCollection.Auth.NeedLogin, clusterHandler.Index)
+		clusterGrp.GET("/usage", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetClusterUsage)
+		clusterGrp.GET("/deploys", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetDeploys)
+		clusterGrp.GET("/deploys_report", middlewareCollection.Auth.NeedAdmin, clusterHandler.GetDeploysReport)
+		clusterGrp.GET("/:id", middlewareCollection.Auth.NeedLogin, clusterHandler.GetClusterById)
+		clusterGrp.PUT("/:id", middlewareCollection.Auth.NeedAdmin, clusterHandler.Update)
+		clusterGrp.GET("/public", clusterHandler.GetClusterPublic)
+	}
+	adminGrp := apiGroup.Group("/admin")
+	adminGrp.Use(middleware.NeedAdmin(config))
+	err = createComputingRoutes(adminGrp, clusterHandler)
+	if err != nil {
+		return fmt.Errorf("error creating computing routes: %w", err)
+	}
+
+	return nil
+}
+
+func createSkillRoutes(
+	config *config.Config,
+	apiGroup *gin.RouterGroup,
+	middlewareCollection middleware.MiddlewareCollection,
+	skillHandler *handler.SkillHandler,
+	repoCommonHandler *handler.RepoHandler,
+) {
+	skillGroup := apiGroup.Group("/skills")
+
+	// Upload skill package endpoint - doesn't require existing repo
+	skillGroup.POST("/upload_url", middlewareCollection.Auth.NeedPhoneVerified, skillHandler.GetUploadUrl)
+
+	// Routes that require existing repo
+	skillGroup.Use(middleware.RepoType(types.SkillRepo), middlewareCollection.Repo.RepoExists)
+	{
+		skillGroup.POST("", middlewareCollection.Auth.NeedPhoneVerified, skillHandler.Create)
+		skillGroup.GET("", skillHandler.Index)
+		skillGroup.PUT("/:namespace/:name", middlewareCollection.Auth.NeedLogin, skillHandler.Update)
+		skillGroup.DELETE("/:namespace/:name", middlewareCollection.Auth.NeedLogin, skillHandler.Delete)
+		skillGroup.GET("/:namespace/:name", skillHandler.Show)
+		skillGroup.GET("/:namespace/:name/branches", repoCommonHandler.Branches)
+		skillGroup.POST("/:namespace/:name/branches", middleware.MustLogin(), repoCommonHandler.CreateBranch)
+		skillGroup.DELETE("/:namespace/:name/branches/:branch", middleware.MustLogin(), repoCommonHandler.DeleteBranch)
+		skillGroup.GET("/:namespace/:name/tags", repoCommonHandler.Tags)
+		skillGroup.POST("/:namespace/:name/preupload/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.Preupload)
+
+		// update tags of a certain category
+		skillGroup.GET("/:namespace/:name/all_files", repoCommonHandler.AllFiles)
+		skillGroup.POST("/:namespace/:name/tags/:category", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateTags)
+		skillGroup.GET("/:namespace/:name/last_commit", repoCommonHandler.LastCommit)
+		skillGroup.GET("/:namespace/:name/commit/:commit_id", repoCommonHandler.CommitWithDiff)
+		skillGroup.POST("/:namespace/:name/commit/:revision", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.CommitFiles)
+		skillGroup.GET("/:namespace/:name/diff", repoCommonHandler.DiffBetweenTwoCommits)
+		skillGroup.GET("/:namespace/:name/remote_diff", repoCommonHandler.RemoteDiff)
+		skillGroup.GET("/:namespace/:name/tree", repoCommonHandler.Tree)
+		skillGroup.GET("/:namespace/:name/refs/:ref/tree/*path", repoCommonHandler.TreeV2)
+		skillGroup.GET("/:namespace/:name/refs/:ref/remote_tree/*path", repoCommonHandler.RemoteTree)
+		skillGroup.GET("/:namespace/:name/refs/:ref/logs_tree/*path", repoCommonHandler.LogsTree)
+		skillGroup.GET("/:namespace/:name/commits", repoCommonHandler.Commits)
+		skillGroup.POST("/:namespace/:name/raw/*file_path", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.CreateFile)
+		skillGroup.GET("/:namespace/:name/raw/*file_path", repoCommonHandler.FileRaw)
+		skillGroup.GET("/:namespace/:name/blob/*file_path", repoCommonHandler.FileInfo)
+		skillGroup.GET("/:namespace/:name/download/*file_path", repoCommonHandler.DownloadFile)
+		skillGroup.GET("/:namespace/:name/resolve/*file_path", repoCommonHandler.ResolveDownload)
+		skillGroup.PUT("/:namespace/:name/raw/*file_path", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateFile)
+		skillGroup.DELETE("/:namespace/:name/raw/*file_path", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeleteFile)
+		skillGroup.POST("/:namespace/:name/update_downloads", repoCommonHandler.UpdateDownloads)
+		skillGroup.PUT("/:namespace/:name/incr_downloads", repoCommonHandler.IncrDownloads)
+		skillGroup.POST("/:namespace/:name/upload_file", middlewareCollection.Auth.NeedPhoneVerified, repoCommonHandler.UploadFile)
+		skillGroup.POST("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.CreateMirror)
+		skillGroup.GET("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.GetMirror)
+		skillGroup.PUT("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.UpdateMirror)
+		skillGroup.DELETE("/:namespace/:name/mirror", middlewareCollection.Auth.NeedLogin, repoCommonHandler.DeleteMirror)
+		skillGroup.POST("/:namespace/:name/mirror/sync", middlewareCollection.Auth.NeedLogin, repoCommonHandler.SyncMirror)
+		skillGroup.GET("/:namespace/:name/size/:branch", repoCommonHandler.GetRepoSizeByBranch)
 	}
 }

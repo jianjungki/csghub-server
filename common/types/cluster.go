@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 type ClusterRequest struct {
 	ClusterID     string `json:"cluster_id"`
@@ -59,6 +63,7 @@ type ClusterRes struct {
 	VXPUUsage        float64            `json:"vxpu_usage"`         // vxpu num usage
 	VXPUMemUsage     float64            `json:"vxpu_mem_usage"`     // vxpu mem usage
 	NodeNumber       int                `json:"node_number"`
+	NodeOfflines     int                `json:"node_offlines"` // offline node number
 	Region           string             `json:"region"`
 	Zone             string             `json:"zone"`     //cn-beijing
 	Provider         string             `json:"provider"` //ali
@@ -135,6 +140,10 @@ type NodeHardware struct {
 	MIGs map[string]*MIGResource `json:"migs"` // mig resources
 }
 
+func (h NodeHardware) HasXPU() bool {
+	return h.XPUCapacityLabel != "" || len(h.MIGs) > 0
+}
+
 type NodeResourceInfo struct {
 	NodeName   string `json:"node_name"`
 	NodeStatus string `json:"node_status"`
@@ -142,6 +151,11 @@ type NodeResourceInfo struct {
 	Processes  []ProcessInfo     `json:"processes"` // pods running on the node
 	Labels     map[string]string `json:"labels"`    // labels of the node
 	EnableVXPU bool              `json:"enable_vxpu"`
+	UpdateAt   int64             `json:"update_at"`
+}
+
+func (n NodeResourceInfo) HasXPU() bool {
+	return n.NodeHardware.HasXPU() || n.EnableVXPU
 }
 
 type UpdateClusterResponse struct {
@@ -160,6 +174,13 @@ type ClusterStatus string
 const (
 	ClusterStatusRunning     ClusterStatus = "Running"
 	ClusterStatusUnavailable ClusterStatus = "Unavailable"
+)
+
+// NodeStatus represents the status of a cluster node
+type NodeStatus string
+
+const (
+	NodeStatusOffline NodeStatus = "Offline"
 )
 
 type ClusterMode string
@@ -210,4 +231,47 @@ type HAMIGPU struct {
 	Numa    *int   `json:"numa"`
 	Mode    string `json:"mode"`
 	Health  bool   `json:"health"`
+}
+
+type UpdateClusterNodeReq struct {
+	ID         int64 `json:"id"`
+	EnableVXPU bool  `json:"enable_vxpu"`
+}
+
+type UpdateNodeLabelReq struct {
+	ReservedBy string `json:"reserved_by"`
+	Exclusive  bool   `json:"exclusive"`
+}
+
+type NodeLabel struct {
+	ClusterID  string `json:"cluster_id"`
+	NodeName   string `json:"node_name"`
+	ReservedBy string `json:"reserved_by"`
+	Exclusive  bool   `json:"exclusive"`
+}
+
+type SetNodeAccessModeReq struct {
+	NodeID    int64  `json:"-"`
+	Namespace string `json:"-"`
+	Exclusive bool   `json:"exclusive"`
+}
+
+type CheckExclusiveReq struct {
+	ClusterID string
+	Namespace string
+	Hardware  HardWare
+}
+
+type CheckExclusiveResp struct {
+	NodeAffinity  *corev1.NodeAffinity
+	Tolerations   []Toleration
+	UsedExclusive bool
+}
+
+type ExclusiveOwner struct {
+	Namespace string `json:"namespace"`
+	Type      string `json:"type"`
+	UserID    int64  `json:"user_id"`
+	UserName  string `json:"user_name"`
+	UpdatedAt int64  `json:"updated_at"`
 }

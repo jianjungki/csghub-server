@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
+	"github.com/uptrace/bun"
 	"opencsg.com/csghub-server/common/types"
 )
 
@@ -24,6 +25,9 @@ type ArgoWorkFlowStore interface {
 	// delete workflow by id
 	DeleteWorkFlow(ctx context.Context, id int64) error
 	ListAllRunningEvaluations(ctx context.Context) (WorkFlows []ArgoWorkflow, err error)
+	ListRunningWorkflowsByUserUUID(ctx context.Context, userUUID string) (WorkFlows []ArgoWorkflow, err error)
+	GetClusterWorkflows(ctx context.Context, req types.ClusterWFReq) ([]ArgoWorkflow, int, error)
+	ListWorkflowsByTimeRange(ctx context.Context, req types.WorkflowTimeRangeReq) ([]ArgoWorkflow, int, error)
 }
 
 func NewArgoWorkFlowStore() ArgoWorkFlowStore {
@@ -143,5 +147,85 @@ func (s *argoWorkFlowStoreImpl) ListAllRunningEvaluations(ctx context.Context) (
 		Where("status = ?", v1alpha1.WorkflowRunning).
 		Scan(ctx)
 	return
+}
 
+func (s *argoWorkFlowStoreImpl) ListRunningWorkflowsByUserUUID(ctx context.Context, userUUID string) (WorkFlows []ArgoWorkflow, err error) {
+	err = s.db.Operator.Core.NewSelect().
+		Model(&WorkFlows).
+		Where("user_uuid = ?", userUUID).
+		Where("status in (?)", bun.In([]string{string(v1alpha1.WorkflowRunning), string(v1alpha1.WorkflowPending)})).
+		Scan(ctx)
+	return
+}
+
+func (s *argoWorkFlowStoreImpl) GetClusterWorkflows(ctx context.Context, req types.ClusterWFReq) ([]ArgoWorkflow, int, error) {
+	var result []ArgoWorkflow
+	query := s.db.Operator.Core.NewSelect().Model(&result)
+
+	if req.ClusterID != "" {
+		query = query.Where("cluster_id = ?", req.ClusterID)
+	}
+	if req.ClusterNode != "" {
+		query = query.Where(
+			"? = ANY(STRING_TO_ARRAY(COALESCE(cluster_node, ''), ','))",
+			req.ClusterNode,
+		)
+	}
+	if req.Status != "" {
+		query = query.Where("status = ?", req.Status)
+	}
+	if req.ResourceName != "" {
+		query = query.Where("resource_name = ?", req.ResourceName)
+	}
+	if req.Search != "" {
+		searchPattern := "%" + req.Search + "%"
+		query = query.Where("task_name LIKE ? OR username LIKE ?", searchPattern, searchPattern)
+	}
+
+	total, err := query.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query = query.Order("id DESC").Limit(req.Per).Offset((req.Page - 1) * req.Per)
+	err = query.Scan(ctx, &result)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return result, total, nil
+}
+
+func (s *argoWorkFlowStoreImpl) ListWorkflowsByTimeRange(ctx context.Context, req types.WorkflowTimeRangeReq) ([]ArgoWorkflow, int, error) {
+	var result []ArgoWorkflow
+	query := s.db.Operator.Core.NewSelect().Model(&result)
+
+	if req.StartTime != nil {
+		query = query.Where("submit_time >= ?", req.StartTime)
+	}
+	if req.EndTime != nil {
+		query = query.Where("submit_time <= ?", req.EndTime)
+	}
+
+	// Get total count
+	total, err := query.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	if req.PageSize > 0 {
+		query = query.Limit(req.PageSize)
+	}
+	if req.Page > 0 {
+		query = query.Offset((req.Page - 1) * req.PageSize)
+	}
+
+	query = query.Order("submit_time DESC")
+	err = query.Scan(ctx, &result)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return result, total, nil
 }

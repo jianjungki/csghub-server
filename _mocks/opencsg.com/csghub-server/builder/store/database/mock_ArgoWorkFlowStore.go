@@ -313,6 +313,72 @@ func (_c *MockArgoWorkFlowStore_FindByUsername_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// GetClusterWorkflows provides a mock function with given fields: ctx, req
+func (_m *MockArgoWorkFlowStore) GetClusterWorkflows(ctx context.Context, req types.ClusterWFReq) ([]database.ArgoWorkflow, int, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterWorkflows")
+	}
+
+	var r0 []database.ArgoWorkflow
+	var r1 int
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.ClusterWFReq) ([]database.ArgoWorkflow, int, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, types.ClusterWFReq) []database.ArgoWorkflow); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]database.ArgoWorkflow)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, types.ClusterWFReq) int); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, types.ClusterWFReq) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockArgoWorkFlowStore_GetClusterWorkflows_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterWorkflows'
+type MockArgoWorkFlowStore_GetClusterWorkflows_Call struct {
+	*mock.Call
+}
+
+// GetClusterWorkflows is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req types.ClusterWFReq
+func (_e *MockArgoWorkFlowStore_Expecter) GetClusterWorkflows(ctx interface{}, req interface{}) *MockArgoWorkFlowStore_GetClusterWorkflows_Call {
+	return &MockArgoWorkFlowStore_GetClusterWorkflows_Call{Call: _e.mock.On("GetClusterWorkflows", ctx, req)}
+}
+
+func (_c *MockArgoWorkFlowStore_GetClusterWorkflows_Call) Run(run func(ctx context.Context, req types.ClusterWFReq)) *MockArgoWorkFlowStore_GetClusterWorkflows_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.ClusterWFReq))
+	})
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_GetClusterWorkflows_Call) Return(_a0 []database.ArgoWorkflow, _a1 int, _a2 error) *MockArgoWorkFlowStore_GetClusterWorkflows_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_GetClusterWorkflows_Call) RunAndReturn(run func(context.Context, types.ClusterWFReq) ([]database.ArgoWorkflow, int, error)) *MockArgoWorkFlowStore_GetClusterWorkflows_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListAllRunningEvaluations provides a mock function with given fields: ctx
 func (_m *MockArgoWorkFlowStore) ListAllRunningEvaluations(ctx context.Context) ([]database.ArgoWorkflow, error) {
 	ret := _m.Called(ctx)
@@ -367,6 +433,131 @@ func (_c *MockArgoWorkFlowStore_ListAllRunningEvaluations_Call) Return(WorkFlows
 }
 
 func (_c *MockArgoWorkFlowStore_ListAllRunningEvaluations_Call) RunAndReturn(run func(context.Context) ([]database.ArgoWorkflow, error)) *MockArgoWorkFlowStore_ListAllRunningEvaluations_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRunningWorkflowsByUserUUID provides a mock function with given fields: ctx, userUUID
+func (_m *MockArgoWorkFlowStore) ListRunningWorkflowsByUserUUID(ctx context.Context, userUUID string) ([]database.ArgoWorkflow, error) {
+	ret := _m.Called(ctx, userUUID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRunningWorkflowsByUserUUID")
+	}
+
+	var r0 []database.ArgoWorkflow
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]database.ArgoWorkflow, error)); ok {
+		return rf(ctx, userUUID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []database.ArgoWorkflow); ok {
+		r0 = rf(ctx, userUUID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]database.ArgoWorkflow)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, userUUID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRunningWorkflowsByUserUUID'
+type MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call struct {
+	*mock.Call
+}
+
+// ListRunningWorkflowsByUserUUID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userUUID string
+func (_e *MockArgoWorkFlowStore_Expecter) ListRunningWorkflowsByUserUUID(ctx interface{}, userUUID interface{}) *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call {
+	return &MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call{Call: _e.mock.On("ListRunningWorkflowsByUserUUID", ctx, userUUID)}
+}
+
+func (_c *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call) Run(run func(ctx context.Context, userUUID string)) *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call) Return(WorkFlows []database.ArgoWorkflow, err error) *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call {
+	_c.Call.Return(WorkFlows, err)
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call) RunAndReturn(run func(context.Context, string) ([]database.ArgoWorkflow, error)) *MockArgoWorkFlowStore_ListRunningWorkflowsByUserUUID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListWorkflowsByTimeRange provides a mock function with given fields: ctx, req
+func (_m *MockArgoWorkFlowStore) ListWorkflowsByTimeRange(ctx context.Context, req types.WorkflowTimeRangeReq) ([]database.ArgoWorkflow, int, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListWorkflowsByTimeRange")
+	}
+
+	var r0 []database.ArgoWorkflow
+	var r1 int
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.WorkflowTimeRangeReq) ([]database.ArgoWorkflow, int, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, types.WorkflowTimeRangeReq) []database.ArgoWorkflow); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]database.ArgoWorkflow)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, types.WorkflowTimeRangeReq) int); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, types.WorkflowTimeRangeReq) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListWorkflowsByTimeRange'
+type MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call struct {
+	*mock.Call
+}
+
+// ListWorkflowsByTimeRange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req types.WorkflowTimeRangeReq
+func (_e *MockArgoWorkFlowStore_Expecter) ListWorkflowsByTimeRange(ctx interface{}, req interface{}) *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call {
+	return &MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call{Call: _e.mock.On("ListWorkflowsByTimeRange", ctx, req)}
+}
+
+func (_c *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call) Run(run func(ctx context.Context, req types.WorkflowTimeRangeReq)) *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.WorkflowTimeRangeReq))
+	})
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call) Return(_a0 []database.ArgoWorkflow, _a1 int, _a2 error) *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call) RunAndReturn(run func(context.Context, types.WorkflowTimeRangeReq) ([]database.ArgoWorkflow, int, error)) *MockArgoWorkFlowStore_ListWorkflowsByTimeRange_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"opencsg.com/csghub-server/api/httpbase"
+	"opencsg.com/csghub-server/builder/git/membership"
 	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 	"opencsg.com/csghub-server/common/utils/common"
@@ -144,7 +145,7 @@ func (h *ModelHandler) Create(ctx *gin.Context) {
 	if err != nil {
 		if errors.Is(err, errorx.ErrForbidden) {
 			httpbase.ForbiddenError(ctx, err)
-		} else if errors.Is(err, errorx.ErrDatabaseDuplicateKey) {
+		} else if errors.Is(err, errorx.ErrDatabaseDuplicateKey) || errors.Is(err, errorx.ErrRepoAlreadyExist) || errors.Is(err, errorx.ErrSpaceNameAlreadyExist) {
 			httpbase.BadRequestWithExt(ctx, err)
 		} else {
 			slog.ErrorContext(ctx.Request.Context(), "Failed to create model", slog.Any("error", err))
@@ -570,7 +571,7 @@ func convertFilePathFromRoute(path string) string {
 // @Param        namespace path string true "namespace"
 // @Param        name path string true "name"
 // @Param        current_user query string true "current_user"
-// @Param        body body types.ModelRunReq true "deploy setting of inference"
+// @Param        body body types.ModelRunReq true "deploy setting of inference (owner_namespace optional: user or org to create inference under)"
 // @Success      200  {object}  string "OK"
 // @Failure      400  {object}  types.APIBadRequest "Bad request"
 // @Failure      500  {object}  types.APIInternalServerError "Internal server error"
@@ -616,6 +617,20 @@ func (h *ModelHandler) DeployDedicated(ctx *gin.Context) {
 		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
 		httpbase.BadRequestWithExt(ctx, errorx.ReqBodyFormat(err, nil))
 		return
+	}
+
+	// Optional owner_namespace: create inference under this user/org (path namespace is still the model's).
+	if req.OwnerNamespace != "" {
+		canWrite, err := h.repo.CheckCurrentUserPermission(ctx.Request.Context(), currentUser, req.OwnerNamespace, membership.RoleWrite)
+		if err != nil {
+			slog.ErrorContext(ctx.Request.Context(), "failed to check owner_namespace permission", "error", err)
+			httpbase.ServerError(ctx, err)
+			return
+		}
+		if !canWrite {
+			httpbase.ForbiddenError(ctx, errors.New("no permission to create inference under the given owner_namespace"))
+			return
+		}
 	}
 
 	if req.MinReplica < 0 || req.MaxReplica < 0 || req.MinReplica > req.MaxReplica {
@@ -673,7 +688,7 @@ func (h *ModelHandler) DeployDedicated(ctx *gin.Context) {
 	h.createAgentInstanceTask(ctx.Request.Context(), req.Agent, fmt.Sprintf("%d", deployID), types.AgentTaskTypeInference, currentUser)
 
 	// return deploy_id
-	response := types.DeployRepo{DeployID: deployID}
+	response := types.DeployRequest{DeployID: deployID}
 
 	httpbase.OK(ctx, response)
 }
@@ -687,7 +702,7 @@ func (h *ModelHandler) DeployDedicated(ctx *gin.Context) {
 // @Param        namespace path string true "namespace"
 // @Param        name path string true "name"
 // @Param        current_user query string true "current_user"
-// @Param        body body types.InstanceRunReq true "deploy setting of instance"
+// @Param        body body types.InstanceRunReq true "deploy setting of instance (owner_namespace optional: user or org to create under)"
 // @Success      200  {object}  string "OK"
 // @Failure      400  {object}  types.APIBadRequest "Bad request"
 // @Failure      500  {object}  types.APIInternalServerError "Internal server error"
@@ -733,6 +748,20 @@ func (h *ModelHandler) FinetuneCreate(ctx *gin.Context) {
 		return
 	}
 
+	// Optional owner_namespace: create finetune under this user/org (path namespace is still the model's).
+	if req.OwnerNamespace != "" {
+		canWrite, err := h.repo.CheckCurrentUserPermission(ctx.Request.Context(), currentUser, req.OwnerNamespace, membership.RoleWrite)
+		if err != nil {
+			slog.ErrorContext(ctx.Request.Context(), "failed to check owner_namespace permission", "error", err)
+			httpbase.ServerError(ctx, err)
+			return
+		}
+		if !canWrite {
+			httpbase.ForbiddenError(ctx, errors.New("no permission to create finetune under the given owner_namespace"))
+			return
+		}
+	}
+
 	modelReq := &types.ModelRunReq{
 		DeployName:         req.DeployName,
 		ClusterID:          req.ClusterID,
@@ -743,6 +772,7 @@ func (h *ModelHandler) FinetuneCreate(ctx *gin.Context) {
 		SecureLevel:        2,
 		Revision:           req.Revision,
 		OrderDetailID:      req.OrderDetailID,
+		OwnerNamespace:     req.OwnerNamespace,
 	}
 
 	ftReq := types.DeployActReq{
@@ -778,7 +808,7 @@ func (h *ModelHandler) FinetuneCreate(ctx *gin.Context) {
 		slog.String("name", name), slog.Int64("deploy_id", deployID))
 
 	// return deploy_id
-	response := types.DeployRepo{DeployID: deployID}
+	response := types.DeployRequest{DeployID: deployID}
 
 	httpbase.OK(ctx, response)
 }
@@ -891,6 +921,83 @@ func (h *ModelHandler) FinetuneDelete(ctx *gin.Context) {
 		}
 		slog.ErrorContext(ctx.Request.Context(), "Failed to delete finetune", slog.Any("error", err), slog.Any("req", delReq))
 		httpbase.ServerError(ctx, err)
+		return
+	}
+	httpbase.OK(ctx, nil)
+}
+
+// FinetuneUpdate  godoc
+// @Security     ApiKey
+// @Summary      Update a finetune instance
+// @Description  update finetune instance resource_id and cluster_id (deploy must be stopped first)
+// @Tags         Model
+// @Accept       json
+// @Produce      json
+// @Param        namespace path string true "namespace"
+// @Param        name path string true "name"
+// @Param        id path int true "finetune deploy id"
+// @Param        body body types.DeployUpdateReq true "at least resource_id to update resource and cluster"
+// @Success      200  {object}  types.Response{} "OK"
+// @Failure      400  {object}  types.APIBadRequest "Bad request"
+// @Failure      500  {object}  types.APIInternalServerError "Internal server error"
+// @Router       /models/{namespace}/{name}/finetune/{id} [put]
+func (h *ModelHandler) FinetuneUpdate(ctx *gin.Context) {
+	currentUser := httpbase.GetCurrentUser(ctx)
+	namespace, name, err := common.GetNamespaceAndNameFromContext(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err)
+		httpbase.BadRequestWithExt(ctx, err)
+		return
+	}
+	allow, err := h.repo.AllowReadAccess(ctx.Request.Context(), types.ModelRepo, namespace, name, currentUser)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "failed to check user permission", "error", err)
+		httpbase.ServerError(ctx, errors.New("failed to check user permission"))
+		return
+	}
+	if !allow {
+		slog.Warn("user not allowed to update finetune", slog.String("namespace", namespace), slog.String("name", name), slog.Any("username", currentUser))
+		httpbase.ForbiddenError(ctx, errors.New("user is not authorized to update this finetune"))
+		return
+	}
+	deployID, err := strconv.ParseInt(ctx.Param("id"), 10, 64)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", slog.Any("error", err), slog.Any("id", ctx.Param("id")))
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+	var req *types.DeployUpdateReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "Bad request format", "error", err, slog.Any("request.body", ctx.Request.Body))
+		httpbase.BadRequest(ctx, err.Error())
+		return
+	}
+	if req.MinReplica != nil && req.MaxReplica != nil {
+		err = Validate.Struct(req)
+		if err != nil {
+			slog.ErrorContext(ctx.Request.Context(), "Bad request setting for finetune update", slog.Any("req", *req), slog.Any("err", err))
+			httpbase.BadRequest(ctx, fmt.Sprintf("Bad request setting for deploy, %v", err))
+			return
+		}
+	}
+	updateReq := types.DeployActReq{
+		RepoType:    types.ModelRepo,
+		Namespace:   namespace,
+		Name:        name,
+		CurrentUser: currentUser,
+		DeployID:    deployID,
+		DeployType:  types.FinetuneType,
+	}
+	err = h.repo.DeployUpdate(ctx.Request.Context(), updateReq, req)
+	if err != nil {
+		if errors.Is(err, errorx.ErrForbidden) {
+			slog.ErrorContext(ctx.Request.Context(), "user not allowed to update finetune", slog.String("namespace", namespace),
+				slog.String("name", name), slog.Any("username", currentUser), slog.Int64("deploy_id", deployID))
+			httpbase.ForbiddenError(ctx, err)
+			return
+		}
+		slog.ErrorContext(ctx.Request.Context(), "failed to update finetune", slog.String("namespace", namespace), slog.String("name", name), slog.Any("username", currentUser), slog.Int64("deploy_id", deployID), slog.Any("error", err))
+		httpbase.ServerError(ctx, fmt.Errorf("failed to update finetune, %w", err))
 		return
 	}
 	httpbase.OK(ctx, nil)
@@ -1513,7 +1620,7 @@ func (h *ModelHandler) DeployServerless(ctx *gin.Context) {
 		slog.String("name", name), slog.Int64("deploy_id", deployID), slog.String("current_user", currentUser))
 
 	// return deploy_id
-	response := types.DeployRepo{DeployID: deployID}
+	response := types.DeployRequest{DeployID: deployID}
 
 	httpbase.OK(ctx, response)
 }

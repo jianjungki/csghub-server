@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,11 +12,20 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"opencsg.com/csghub-server/api/httpbase"
 	"opencsg.com/csghub-server/builder/rpc"
+	"opencsg.com/csghub-server/builder/store/cache"
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/errorx"
 	"opencsg.com/csghub-server/common/types"
 )
+
+const (
+	jwtBlacklistKey = "jwt_blacklist"
+)
+
+var delegatedAuthPathPrefixes = []string{
+	"/api/v1/agent/credentials/runtime/",
+}
 
 // BuildJwtSession create and save session with jwt from query string
 func BuildJwtSession(jwtSignKey string) gin.HandlerFunc {
@@ -66,7 +77,22 @@ func AuthSession() gin.HandlerFunc {
 func Authenticator(config *config.Config) gin.HandlerFunc {
 	svcAddr := fmt.Sprintf("%s:%d", config.User.Host, config.User.Port)
 	userSvcClient := rpc.NewUserSvcHttpClient(svcAddr, rpc.AuthWithApiKey(config.APIToken))
+
+	redisClient, err := cache.NewCache(context.Background(), cache.RedisConfig{
+		Addr:     config.Redis.Endpoint,
+		Username: config.Redis.User,
+		Password: config.Redis.Password,
+	})
+	if err != nil {
+		slog.Error("failed to initialize redis client in authenticator", slog.Any("error", err))
+	}
+
 	return func(c *gin.Context) {
+		if usesDelegatedAuth(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+
 		result := isValidBrowserSession(c)
 		if result {
 			c.Next()
@@ -74,47 +100,71 @@ func Authenticator(config *config.Config) gin.HandlerFunc {
 		}
 
 		// Get Auzhorization token
-		authHeader := c.Request.Header.Get("Authorization")
+		authHeader := c.Request.Header.Get(types.HeaderAuthorization)
 		if authHeader == "" {
 			c.Next()
 			return
 		}
 
-		if !strings.HasPrefix(authHeader, "Bearer ") {
+		switch {
+		case strings.HasPrefix(authHeader, "Bearer "):
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			result = isValidApiToken(c, config, token)
+			if result {
+				c.Next()
+				return
+			}
+
+			result = isValidJWTToken(c, config, token, redisClient)
+			if result {
+				c.Next()
+				return
+			}
+
+			result = isValidAccessToken(c, userSvcClient, token)
+			if result {
+				c.Next()
+				return
+			}
+
+			slog.ErrorContext(c, "invalid Bearer token",
+				slog.String("ip", c.ClientIP()),
+				slog.String("method", c.Request.Method),
+				slog.String("url", c.Request.URL.RequestURI()),
+			)
 			httpbase.UnauthorizedError(c, errorx.ErrInvalidAuthHeader)
 			c.Abort()
-			return
+		case strings.HasPrefix(authHeader, "Basic "):
+			token := strings.TrimPrefix(authHeader, "Basic ")
+			result = isValidBasicToken(c, userSvcClient, token)
+			if result {
+				c.Next()
+				return
+			}
+
+			slog.ErrorContext(c, "invalid Basic token",
+				slog.String("ip", c.ClientIP()),
+				slog.String("method", c.Request.Method),
+				slog.String("url", c.Request.URL.RequestURI()),
+			)
+			httpbase.UnauthorizedError(c, errorx.ErrInvalidAuthHeader)
+			c.Abort()
+		default:
+			httpbase.UnauthorizedError(c, errorx.ErrInvalidAuthHeader)
+			c.Abort()
 		}
-
-		// Get token from header
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-
-		result = isValidApiToken(c, config, token)
-		if result {
-			c.Next()
-			return
-		}
-
-		result = isValidJWTToken(c, config, token)
-		if result {
-			c.Next()
-			return
-		}
-
-		result = isValidAccessToken(c, userSvcClient, token)
-		if result {
-			c.Next()
-			return
-		}
-
-		slog.ErrorContext(c, "invalid Bearer token", slog.String("token", token),
-			slog.String("ip", c.ClientIP()),
-			slog.String("method", c.Request.Method),
-			slog.String("url", c.Request.URL.RequestURI()),
-		)
-		httpbase.UnauthorizedError(c, errorx.ErrInvalidAuthHeader)
-		c.Abort()
 	}
+}
+
+func usesDelegatedAuth(path string) bool {
+	// Some routes use Authorization for route-specific tokens instead of user/API/access tokens.
+	// The route handler or component must validate those tokens before doing work.
+	for _, prefix := range delegatedAuthPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isValidBrowserSession(c *gin.Context) bool {
@@ -123,11 +173,15 @@ func isValidBrowserSession(c *gin.Context) bool {
 	if sessionExists && sessionObj != nil {
 		session := sessions.Default(c)
 		sessionUserName := session.Get(httpbase.CurrentUserCtxVar)
+		sessionUserUUID := session.Get(httpbase.CurrentUserUUIDCtxVar)
 		if sessionUserName != nil {
 			slog.Debug("get username from session", slog.Any("session username", sessionUserName.(string)))
 			if len(sessionUserName.(string)) > 0 {
 				// login success on UI
 				httpbase.SetCurrentUser(c, sessionUserName.(string))
+				if sessionUserUUIDStr, ok := sessionUserUUID.(string); ok && sessionUserUUIDStr != "" {
+					httpbase.SetCurrentUserUUID(c, sessionUserUUIDStr)
+				}
 				httpbase.SetAuthType(c, httpbase.AuthTypeJwt)
 				return true
 			}
@@ -154,8 +208,15 @@ func isValidApiToken(c *gin.Context, config *config.Config, token string) bool {
 	return false
 }
 
-func isValidJWTToken(c *gin.Context, config *config.Config, token string) bool {
+func isValidJWTToken(c *gin.Context, config *config.Config, token string, rc cache.RedisClient) bool {
 	if strings.Contains(token, ".") {
+		if rc != nil {
+			isMember, _ := rc.SIsMember(c.Request.Context(), jwtBlacklistKey, token)
+			if isMember {
+				slog.WarnContext(c.Request.Context(), "jwt token is in blacklist", slog.String("token", token))
+				return false
+			}
+		}
 		claims, err := parseJWTToken(config.JWT.SigningKey, token)
 		if err == nil {
 			httpbase.SetCurrentUser(c, claims.CurrentUser)
@@ -213,12 +274,34 @@ func parseJWTToken(signKey, tokenString string) (*types.JWTClaims, error) {
 	return nil, errorx.InvalidAuthHeader(err, nil)
 }
 
+func isValidBasicToken(c *gin.Context, userSvcClient rpc.UserSvcClient, token string) bool {
+	var username, accessToken string
+	authInfo, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		slog.ErrorContext(c, "Failed to decode basic auth header", slog.Any("error", err))
+		return false
+	}
+	username = strings.Split(string(authInfo), ":")[0]
+	accessToken = strings.Split(string(authInfo), ":")[1]
+	user, err := userSvcClient.VerifyByAccessToken(c.Request.Context(), accessToken)
+	if err != nil {
+		slog.ErrorContext(c, "verify access token error", slog.Any("error", err))
+		return false
+	}
+	if user.Username == username {
+		httpbase.SetCurrentUser(c, username)
+		httpbase.SetCurrentUserUUID(c, user.UserUUID)
+		return true
+	}
+	return false
+}
+
 func NeedAPIKey(config *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiToken := config.APIToken
 
 		// Get Authorization token
-		authHeader := c.Request.Header.Get("Authorization")
+		authHeader := c.Request.Header.Get(types.HeaderAuthorization)
 
 		// Check Authorization Header format
 		if authHeader == "" {
@@ -311,6 +394,18 @@ func UserMatch() gin.HandlerFunc {
 	}
 }
 
+func NeedAccessToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authType := httpbase.GetAuthType(c)
+		if authType != httpbase.AuthTypeAccessToken {
+			httpbase.UnauthorizedError(c, errorx.ErrNeedAccessToken)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func RestrictMultiSyncTokenToRead() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authType := httpbase.GetAuthType(c)
@@ -347,6 +442,8 @@ type MiddlewareCollection struct {
 		UserMatch gin.HandlerFunc
 		// user must have phone verified
 		NeedPhoneVerified gin.HandlerFunc
+		// request must be authenticated with an access token
+		NeedAccessToken gin.HandlerFunc
 	}
 
 	Repo struct {

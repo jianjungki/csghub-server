@@ -733,21 +733,33 @@ func (_c *MockRepoComponent_ChangePath_Call) RunAndReturn(run func(context.Conte
 }
 
 // CheckAccountAndResource provides a mock function with given fields: ctx, userName, clusterID, orderDetailID, resource
-func (_m *MockRepoComponent) CheckAccountAndResource(ctx context.Context, userName string, clusterID string, orderDetailID int64, resource *database.SpaceResource) error {
+func (_m *MockRepoComponent) CheckAccountAndResource(ctx context.Context, userName string, clusterID string, orderDetailID int64, resource *database.SpaceResource) (*types.CheckExclusiveResp, error) {
 	ret := _m.Called(ctx, userName, clusterID, orderDetailID, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckAccountAndResource")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *database.SpaceResource) error); ok {
+	var r0 *types.CheckExclusiveResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *database.SpaceResource) (*types.CheckExclusiveResp, error)); ok {
+		return rf(ctx, userName, clusterID, orderDetailID, resource)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, *database.SpaceResource) *types.CheckExclusiveResp); ok {
 		r0 = rf(ctx, userName, clusterID, orderDetailID, resource)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.CheckExclusiveResp)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, *database.SpaceResource) error); ok {
+		r1 = rf(ctx, userName, clusterID, orderDetailID, resource)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockRepoComponent_CheckAccountAndResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckAccountAndResource'
@@ -772,12 +784,12 @@ func (_c *MockRepoComponent_CheckAccountAndResource_Call) Run(run func(ctx conte
 	return _c
 }
 
-func (_c *MockRepoComponent_CheckAccountAndResource_Call) Return(_a0 error) *MockRepoComponent_CheckAccountAndResource_Call {
-	_c.Call.Return(_a0)
+func (_c *MockRepoComponent_CheckAccountAndResource_Call) Return(_a0 *types.CheckExclusiveResp, _a1 error) *MockRepoComponent_CheckAccountAndResource_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRepoComponent_CheckAccountAndResource_Call) RunAndReturn(run func(context.Context, string, string, int64, *database.SpaceResource) error) *MockRepoComponent_CheckAccountAndResource_Call {
+func (_c *MockRepoComponent_CheckAccountAndResource_Call) RunAndReturn(run func(context.Context, string, string, int64, *database.SpaceResource) (*types.CheckExclusiveResp, error)) *MockRepoComponent_CheckAccountAndResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1024,6 +1036,53 @@ func (_c *MockRepoComponent_Commits_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// CreateBranch provides a mock function with given fields: ctx, req
+func (_m *MockRepoComponent) CreateBranch(ctx context.Context, req *types.CreateBranchReq) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateBranch")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.CreateBranchReq) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRepoComponent_CreateBranch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateBranch'
+type MockRepoComponent_CreateBranch_Call struct {
+	*mock.Call
+}
+
+// CreateBranch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *types.CreateBranchReq
+func (_e *MockRepoComponent_Expecter) CreateBranch(ctx interface{}, req interface{}) *MockRepoComponent_CreateBranch_Call {
+	return &MockRepoComponent_CreateBranch_Call{Call: _e.mock.On("CreateBranch", ctx, req)}
+}
+
+func (_c *MockRepoComponent_CreateBranch_Call) Run(run func(ctx context.Context, req *types.CreateBranchReq)) *MockRepoComponent_CreateBranch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*types.CreateBranchReq))
+	})
+	return _c
+}
+
+func (_c *MockRepoComponent_CreateBranch_Call) Return(_a0 error) *MockRepoComponent_CreateBranch_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRepoComponent_CreateBranch_Call) RunAndReturn(run func(context.Context, *types.CreateBranchReq) error) *MockRepoComponent_CreateBranch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateFile provides a mock function with given fields: ctx, req
 func (_m *MockRepoComponent) CreateFile(ctx context.Context, req *types.CreateFileReq) (*types.CreateFileResp, error) {
 	ret := _m.Called(ctx, req)
@@ -1079,6 +1138,65 @@ func (_c *MockRepoComponent_CreateFile_Call) Return(_a0 *types.CreateFileResp, _
 }
 
 func (_c *MockRepoComponent_CreateFile_Call) RunAndReturn(run func(context.Context, *types.CreateFileReq) (*types.CreateFileResp, error)) *MockRepoComponent_CreateFile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateFork provides a mock function with given fields: ctx, req
+func (_m *MockRepoComponent) CreateFork(ctx context.Context, req types.CreateForkReq) (*database.Repository, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateFork")
+	}
+
+	var r0 *database.Repository
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.CreateForkReq) (*database.Repository, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, types.CreateForkReq) *database.Repository); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*database.Repository)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, types.CreateForkReq) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRepoComponent_CreateFork_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateFork'
+type MockRepoComponent_CreateFork_Call struct {
+	*mock.Call
+}
+
+// CreateFork is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req types.CreateForkReq
+func (_e *MockRepoComponent_Expecter) CreateFork(ctx interface{}, req interface{}) *MockRepoComponent_CreateFork_Call {
+	return &MockRepoComponent_CreateFork_Call{Call: _e.mock.On("CreateFork", ctx, req)}
+}
+
+func (_c *MockRepoComponent_CreateFork_Call) Run(run func(ctx context.Context, req types.CreateForkReq)) *MockRepoComponent_CreateFork_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.CreateForkReq))
+	})
+	return _c
+}
+
+func (_c *MockRepoComponent_CreateFork_Call) Return(_a0 *database.Repository, _a1 error) *MockRepoComponent_CreateFork_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRepoComponent_CreateFork_Call) RunAndReturn(run func(context.Context, types.CreateForkReq) (*database.Repository, error)) *MockRepoComponent_CreateFork_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1274,6 +1392,53 @@ func (_c *MockRepoComponent_CreateRuntimeFramework_Call) Return(_a0 *types.Runti
 }
 
 func (_c *MockRepoComponent_CreateRuntimeFramework_Call) RunAndReturn(run func(context.Context, *types.RuntimeFrameworkReq) (*types.RuntimeFramework, error)) *MockRepoComponent_CreateRuntimeFramework_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteBranch provides a mock function with given fields: ctx, req
+func (_m *MockRepoComponent) DeleteBranch(ctx context.Context, req *types.DeleteBranchReq) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteBranch")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.DeleteBranchReq) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockRepoComponent_DeleteBranch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBranch'
+type MockRepoComponent_DeleteBranch_Call struct {
+	*mock.Call
+}
+
+// DeleteBranch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *types.DeleteBranchReq
+func (_e *MockRepoComponent_Expecter) DeleteBranch(ctx interface{}, req interface{}) *MockRepoComponent_DeleteBranch_Call {
+	return &MockRepoComponent_DeleteBranch_Call{Call: _e.mock.On("DeleteBranch", ctx, req)}
+}
+
+func (_c *MockRepoComponent_DeleteBranch_Call) Run(run func(ctx context.Context, req *types.DeleteBranchReq)) *MockRepoComponent_DeleteBranch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*types.DeleteBranchReq))
+	})
+	return _c
+}
+
+func (_c *MockRepoComponent_DeleteBranch_Call) Return(_a0 error) *MockRepoComponent_DeleteBranch_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRepoComponent_DeleteBranch_Call) RunAndReturn(run func(context.Context, *types.DeleteBranchReq) error) *MockRepoComponent_DeleteBranch_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1585,23 +1750,23 @@ func (_c *MockRepoComponent_DeleteRuntimeFramework_Call) RunAndReturn(run func(c
 }
 
 // DeployDetail provides a mock function with given fields: ctx, detailReq
-func (_m *MockRepoComponent) DeployDetail(ctx context.Context, detailReq types.DeployActReq) (*types.DeployRepo, error) {
+func (_m *MockRepoComponent) DeployDetail(ctx context.Context, detailReq types.DeployActReq) (*types.DeployRequest, error) {
 	ret := _m.Called(ctx, detailReq)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeployDetail")
 	}
 
-	var r0 *types.DeployRepo
+	var r0 *types.DeployRequest
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployActReq) (*types.DeployRepo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployActReq) (*types.DeployRequest, error)); ok {
 		return rf(ctx, detailReq)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployActReq) *types.DeployRepo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployActReq) *types.DeployRequest); ok {
 		r0 = rf(ctx, detailReq)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.DeployRepo)
+			r0 = ret.Get(0).(*types.DeployRequest)
 		}
 	}
 
@@ -1633,12 +1798,12 @@ func (_c *MockRepoComponent_DeployDetail_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *MockRepoComponent_DeployDetail_Call) Return(_a0 *types.DeployRepo, _a1 error) *MockRepoComponent_DeployDetail_Call {
+func (_c *MockRepoComponent_DeployDetail_Call) Return(_a0 *types.DeployRequest, _a1 error) *MockRepoComponent_DeployDetail_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRepoComponent_DeployDetail_Call) RunAndReturn(run func(context.Context, types.DeployActReq) (*types.DeployRepo, error)) *MockRepoComponent_DeployDetail_Call {
+func (_c *MockRepoComponent_DeployDetail_Call) RunAndReturn(run func(context.Context, types.DeployActReq) (*types.DeployRequest, error)) *MockRepoComponent_DeployDetail_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2538,6 +2703,124 @@ func (_c *MockRepoComponent_GetNameSpaceInfo_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// GetNamespaceBillingUUID provides a mock function with given fields: ctx, namespace
+func (_m *MockRepoComponent) GetNamespaceBillingUUID(ctx context.Context, namespace string) (string, error) {
+	ret := _m.Called(ctx, namespace)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNamespaceBillingUUID")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, namespace)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, namespace)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, namespace)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRepoComponent_GetNamespaceBillingUUID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNamespaceBillingUUID'
+type MockRepoComponent_GetNamespaceBillingUUID_Call struct {
+	*mock.Call
+}
+
+// GetNamespaceBillingUUID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespace string
+func (_e *MockRepoComponent_Expecter) GetNamespaceBillingUUID(ctx interface{}, namespace interface{}) *MockRepoComponent_GetNamespaceBillingUUID_Call {
+	return &MockRepoComponent_GetNamespaceBillingUUID_Call{Call: _e.mock.On("GetNamespaceBillingUUID", ctx, namespace)}
+}
+
+func (_c *MockRepoComponent_GetNamespaceBillingUUID_Call) Run(run func(ctx context.Context, namespace string)) *MockRepoComponent_GetNamespaceBillingUUID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockRepoComponent_GetNamespaceBillingUUID_Call) Return(_a0 string, _a1 error) *MockRepoComponent_GetNamespaceBillingUUID_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRepoComponent_GetNamespaceBillingUUID_Call) RunAndReturn(run func(context.Context, string) (string, error)) *MockRepoComponent_GetNamespaceBillingUUID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRepoSizeByBranch provides a mock function with given fields: ctx, repoType, namespace, name, branch, currentUser
+func (_m *MockRepoComponent) GetRepoSizeByBranch(ctx context.Context, repoType types.RepositoryType, namespace string, name string, branch string, currentUser string) (int64, error) {
+	ret := _m.Called(ctx, repoType, namespace, name, branch, currentUser)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRepoSizeByBranch")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string, string) (int64, error)); ok {
+		return rf(ctx, repoType, namespace, name, branch, currentUser)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string, string) int64); ok {
+		r0 = rf(ctx, repoType, namespace, name, branch, currentUser)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, types.RepositoryType, string, string, string, string) error); ok {
+		r1 = rf(ctx, repoType, namespace, name, branch, currentUser)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRepoComponent_GetRepoSizeByBranch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRepoSizeByBranch'
+type MockRepoComponent_GetRepoSizeByBranch_Call struct {
+	*mock.Call
+}
+
+// GetRepoSizeByBranch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repoType types.RepositoryType
+//   - namespace string
+//   - name string
+//   - branch string
+//   - currentUser string
+func (_e *MockRepoComponent_Expecter) GetRepoSizeByBranch(ctx interface{}, repoType interface{}, namespace interface{}, name interface{}, branch interface{}, currentUser interface{}) *MockRepoComponent_GetRepoSizeByBranch_Call {
+	return &MockRepoComponent_GetRepoSizeByBranch_Call{Call: _e.mock.On("GetRepoSizeByBranch", ctx, repoType, namespace, name, branch, currentUser)}
+}
+
+func (_c *MockRepoComponent_GetRepoSizeByBranch_Call) Run(run func(ctx context.Context, repoType types.RepositoryType, namespace string, name string, branch string, currentUser string)) *MockRepoComponent_GetRepoSizeByBranch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(types.RepositoryType), args[2].(string), args[3].(string), args[4].(string), args[5].(string))
+	})
+	return _c
+}
+
+func (_c *MockRepoComponent_GetRepoSizeByBranch_Call) Return(_a0 int64, _a1 error) *MockRepoComponent_GetRepoSizeByBranch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRepoComponent_GetRepoSizeByBranch_Call) RunAndReturn(run func(context.Context, types.RepositoryType, string, string, string, string) (int64, error)) *MockRepoComponent_GetRepoSizeByBranch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRepos provides a mock function with given fields: ctx, search, currentUser, repoType
 func (_m *MockRepoComponent) GetRepos(ctx context.Context, search string, currentUser string, repoType types.RepositoryType) ([]string, error) {
 	ret := _m.Called(ctx, search, currentUser, repoType)
@@ -3138,23 +3421,23 @@ func (_c *MockRepoComponent_LastCommit_Call) RunAndReturn(run func(context.Conte
 }
 
 // ListDeploy provides a mock function with given fields: ctx, repoType, namespace, name, currentUser
-func (_m *MockRepoComponent) ListDeploy(ctx context.Context, repoType types.RepositoryType, namespace string, name string, currentUser string) ([]types.DeployRepo, error) {
+func (_m *MockRepoComponent) ListDeploy(ctx context.Context, repoType types.RepositoryType, namespace string, name string, currentUser string) ([]types.DeployRequest, error) {
 	ret := _m.Called(ctx, repoType, namespace, name, currentUser)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListDeploy")
 	}
 
-	var r0 []types.DeployRepo
+	var r0 []types.DeployRequest
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string) ([]types.DeployRepo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string) ([]types.DeployRequest, error)); ok {
 		return rf(ctx, repoType, namespace, name, currentUser)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string) []types.DeployRepo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.RepositoryType, string, string, string) []types.DeployRequest); ok {
 		r0 = rf(ctx, repoType, namespace, name, currentUser)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]types.DeployRepo)
+			r0 = ret.Get(0).([]types.DeployRequest)
 		}
 	}
 
@@ -3189,12 +3472,12 @@ func (_c *MockRepoComponent_ListDeploy_Call) Run(run func(ctx context.Context, r
 	return _c
 }
 
-func (_c *MockRepoComponent_ListDeploy_Call) Return(_a0 []types.DeployRepo, _a1 error) *MockRepoComponent_ListDeploy_Call {
+func (_c *MockRepoComponent_ListDeploy_Call) Return(_a0 []types.DeployRequest, _a1 error) *MockRepoComponent_ListDeploy_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRepoComponent_ListDeploy_Call) RunAndReturn(run func(context.Context, types.RepositoryType, string, string, string) ([]types.DeployRepo, error)) *MockRepoComponent_ListDeploy_Call {
+func (_c *MockRepoComponent_ListDeploy_Call) RunAndReturn(run func(context.Context, types.RepositoryType, string, string, string) ([]types.DeployRequest, error)) *MockRepoComponent_ListDeploy_Call {
 	_c.Call.Return(run)
 	return _c
 }

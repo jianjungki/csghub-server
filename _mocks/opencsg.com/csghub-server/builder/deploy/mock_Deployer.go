@@ -5,8 +5,11 @@ package deploy
 import (
 	context "context"
 
-	deploy "opencsg.com/csghub-server/builder/deploy"
+	config "opencsg.com/csghub-server/common/config"
+
 	database "opencsg.com/csghub-server/builder/store/database"
+
+	deploy "opencsg.com/csghub-server/builder/deploy"
 
 	loki "opencsg.com/csghub-server/builder/loki"
 
@@ -86,7 +89,7 @@ func (_c *MockDeployer_CheckHeartbeatTimeout_Call) RunAndReturn(run func(context
 }
 
 // CheckResourceAvailable provides a mock function with given fields: ctx, clusterId, orderDetailID, hardWare
-func (_m *MockDeployer) CheckResourceAvailable(ctx context.Context, clusterId string, orderDetailID int64, hardWare *types.HardWare) (bool, error) {
+func (_m *MockDeployer) CheckResourceAvailable(ctx context.Context, clusterId string, orderDetailID int64, hardWare *types.HardWare) (bool, []types.ResourceAvailableStatus, error) {
 	ret := _m.Called(ctx, clusterId, orderDetailID, hardWare)
 
 	if len(ret) == 0 {
@@ -94,8 +97,9 @@ func (_m *MockDeployer) CheckResourceAvailable(ctx context.Context, clusterId st
 	}
 
 	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, *types.HardWare) (bool, error)); ok {
+	var r1 []types.ResourceAvailableStatus
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, *types.HardWare) (bool, []types.ResourceAvailableStatus, error)); ok {
 		return rf(ctx, clusterId, orderDetailID, hardWare)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string, int64, *types.HardWare) bool); ok {
@@ -104,13 +108,21 @@ func (_m *MockDeployer) CheckResourceAvailable(ctx context.Context, clusterId st
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, int64, *types.HardWare) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, *types.HardWare) []types.ResourceAvailableStatus); ok {
 		r1 = rf(ctx, clusterId, orderDetailID, hardWare)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]types.ResourceAvailableStatus)
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, string, int64, *types.HardWare) error); ok {
+		r2 = rf(ctx, clusterId, orderDetailID, hardWare)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockDeployer_CheckResourceAvailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckResourceAvailable'
@@ -134,12 +146,12 @@ func (_c *MockDeployer_CheckResourceAvailable_Call) Run(run func(ctx context.Con
 	return _c
 }
 
-func (_c *MockDeployer_CheckResourceAvailable_Call) Return(_a0 bool, _a1 error) *MockDeployer_CheckResourceAvailable_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockDeployer_CheckResourceAvailable_Call) Return(_a0 bool, _a1 []types.ResourceAvailableStatus, _a2 error) *MockDeployer_CheckResourceAvailable_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockDeployer_CheckResourceAvailable_Call) RunAndReturn(run func(context.Context, string, int64, *types.HardWare) (bool, error)) *MockDeployer_CheckResourceAvailable_Call {
+func (_c *MockDeployer_CheckResourceAvailable_Call) RunAndReturn(run func(context.Context, string, int64, *types.HardWare) (bool, []types.ResourceAvailableStatus, error)) *MockDeployer_CheckResourceAvailable_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -239,7 +251,7 @@ func (_c *MockDeployer_DeleteFinetuneJob_Call) RunAndReturn(run func(context.Con
 }
 
 // Deploy provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Deploy(ctx context.Context, dr types.DeployRepo) (int64, error) {
+func (_m *MockDeployer) Deploy(ctx context.Context, dr types.DeployRequest) (int64, error) {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -248,16 +260,16 @@ func (_m *MockDeployer) Deploy(ctx context.Context, dr types.DeployRepo) (int64,
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) (int64, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) (int64, error)); ok {
 		return rf(ctx, dr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) int64); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) int64); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest) error); ok {
 		r1 = rf(ctx, dr)
 	} else {
 		r1 = ret.Error(1)
@@ -273,14 +285,14 @@ type MockDeployer_Deploy_Call struct {
 
 // Deploy is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Deploy(ctx interface{}, dr interface{}) *MockDeployer_Deploy_Call {
 	return &MockDeployer_Deploy_Call{Call: _e.mock.On("Deploy", ctx, dr)}
 }
 
-func (_c *MockDeployer_Deploy_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Deploy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -290,13 +302,13 @@ func (_c *MockDeployer_Deploy_Call) Return(deployID int64, err error) *MockDeplo
 	return _c
 }
 
-func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func(context.Context, types.DeployRepo) (int64, error)) *MockDeployer_Deploy_Call {
+func (_c *MockDeployer_Deploy_Call) RunAndReturn(run func(context.Context, types.DeployRequest) (int64, error)) *MockDeployer_Deploy_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Exist provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Exist(ctx context.Context, dr types.DeployRepo) (bool, error) {
+func (_m *MockDeployer) Exist(ctx context.Context, dr types.DeployRequest) (bool, error) {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -305,16 +317,16 @@ func (_m *MockDeployer) Exist(ctx context.Context, dr types.DeployRepo) (bool, e
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) (bool, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) (bool, error)); ok {
 		return rf(ctx, dr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) bool); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) bool); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest) error); ok {
 		r1 = rf(ctx, dr)
 	} else {
 		r1 = ret.Error(1)
@@ -330,14 +342,14 @@ type MockDeployer_Exist_Call struct {
 
 // Exist is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Exist(ctx interface{}, dr interface{}) *MockDeployer_Exist_Call {
 	return &MockDeployer_Exist_Call{Call: _e.mock.On("Exist", ctx, dr)}
 }
 
-func (_c *MockDeployer_Exist_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Exist_Call {
+func (_c *MockDeployer_Exist_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Exist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -347,7 +359,7 @@ func (_c *MockDeployer_Exist_Call) Return(_a0 bool, _a1 error) *MockDeployer_Exi
 	return _c
 }
 
-func (_c *MockDeployer_Exist_Call) RunAndReturn(run func(context.Context, types.DeployRepo) (bool, error)) *MockDeployer_Exist_Call {
+func (_c *MockDeployer_Exist_Call) RunAndReturn(run func(context.Context, types.DeployRequest) (bool, error)) *MockDeployer_Exist_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -407,65 +419,6 @@ func (_c *MockDeployer_GetClusterById_Call) Return(_a0 *types.ClusterRes, _a1 er
 }
 
 func (_c *MockDeployer_GetClusterById_Call) RunAndReturn(run func(context.Context, string) (*types.ClusterRes, error)) *MockDeployer_GetClusterById_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetClusterUsageById provides a mock function with given fields: ctx, clusterId
-func (_m *MockDeployer) GetClusterUsageById(ctx context.Context, clusterId string) (*types.ClusterRes, error) {
-	ret := _m.Called(ctx, clusterId)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetClusterUsageById")
-	}
-
-	var r0 *types.ClusterRes
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*types.ClusterRes, error)); ok {
-		return rf(ctx, clusterId)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *types.ClusterRes); ok {
-		r0 = rf(ctx, clusterId)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ClusterRes)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, clusterId)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDeployer_GetClusterUsageById_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterUsageById'
-type MockDeployer_GetClusterUsageById_Call struct {
-	*mock.Call
-}
-
-// GetClusterUsageById is a helper method to define mock.On call
-//   - ctx context.Context
-//   - clusterId string
-func (_e *MockDeployer_Expecter) GetClusterUsageById(ctx interface{}, clusterId interface{}) *MockDeployer_GetClusterUsageById_Call {
-	return &MockDeployer_GetClusterUsageById_Call{Call: _e.mock.On("GetClusterUsageById", ctx, clusterId)}
-}
-
-func (_c *MockDeployer_GetClusterUsageById_Call) Run(run func(ctx context.Context, clusterId string)) *MockDeployer_GetClusterUsageById_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *MockDeployer_GetClusterUsageById_Call) Return(_a0 *types.ClusterRes, _a1 error) *MockDeployer_GetClusterUsageById_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDeployer_GetClusterUsageById_Call) RunAndReturn(run func(context.Context, string) (*types.ClusterRes, error)) *MockDeployer_GetClusterUsageById_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -530,7 +483,7 @@ func (_c *MockDeployer_GetEvaluation_Call) RunAndReturn(run func(context.Context
 }
 
 // GetReplica provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) GetReplica(ctx context.Context, dr types.DeployRepo) (int, int, []types.Instance, error) {
+func (_m *MockDeployer) GetReplica(ctx context.Context, dr types.DeployRequest) (int, int, []types.Instance, error) {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -541,22 +494,22 @@ func (_m *MockDeployer) GetReplica(ctx context.Context, dr types.DeployRepo) (in
 	var r1 int
 	var r2 []types.Instance
 	var r3 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) (int, int, []types.Instance, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) (int, int, []types.Instance, error)); ok {
 		return rf(ctx, dr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) int); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) int); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo) int); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest) int); ok {
 		r1 = rf(ctx, dr)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, types.DeployRepo) []types.Instance); ok {
+	if rf, ok := ret.Get(2).(func(context.Context, types.DeployRequest) []types.Instance); ok {
 		r2 = rf(ctx, dr)
 	} else {
 		if ret.Get(2) != nil {
@@ -564,7 +517,7 @@ func (_m *MockDeployer) GetReplica(ctx context.Context, dr types.DeployRepo) (in
 		}
 	}
 
-	if rf, ok := ret.Get(3).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(3).(func(context.Context, types.DeployRequest) error); ok {
 		r3 = rf(ctx, dr)
 	} else {
 		r3 = ret.Error(3)
@@ -580,14 +533,14 @@ type MockDeployer_GetReplica_Call struct {
 
 // GetReplica is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) GetReplica(ctx interface{}, dr interface{}) *MockDeployer_GetReplica_Call {
 	return &MockDeployer_GetReplica_Call{Call: _e.mock.On("GetReplica", ctx, dr)}
 }
 
-func (_c *MockDeployer_GetReplica_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_GetReplica_Call {
+func (_c *MockDeployer_GetReplica_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_GetReplica_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -597,7 +550,53 @@ func (_c *MockDeployer_GetReplica_Call) Return(_a0 int, _a1 int, _a2 []types.Ins
 	return _c
 }
 
-func (_c *MockDeployer_GetReplica_Call) RunAndReturn(run func(context.Context, types.DeployRepo) (int, int, []types.Instance, error)) *MockDeployer_GetReplica_Call {
+func (_c *MockDeployer_GetReplica_Call) RunAndReturn(run func(context.Context, types.DeployRequest) (int, int, []types.Instance, error)) *MockDeployer_GetReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetSharedModeResourceName provides a mock function with given fields: _a0
+func (_m *MockDeployer) GetSharedModeResourceName(_a0 *config.Config) string {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSharedModeResourceName")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(*config.Config) string); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockDeployer_GetSharedModeResourceName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSharedModeResourceName'
+type MockDeployer_GetSharedModeResourceName_Call struct {
+	*mock.Call
+}
+
+// GetSharedModeResourceName is a helper method to define mock.On call
+//   - _a0 *config.Config
+func (_e *MockDeployer_Expecter) GetSharedModeResourceName(_a0 interface{}) *MockDeployer_GetSharedModeResourceName_Call {
+	return &MockDeployer_GetSharedModeResourceName_Call{Call: _e.mock.On("GetSharedModeResourceName", _a0)}
+}
+
+func (_c *MockDeployer_GetSharedModeResourceName_Call) Run(run func(_a0 *config.Config)) *MockDeployer_GetSharedModeResourceName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*config.Config))
+	})
+	return _c
+}
+
+func (_c *MockDeployer_GetSharedModeResourceName_Call) Return(_a0 string) *MockDeployer_GetSharedModeResourceName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockDeployer_GetSharedModeResourceName_Call) RunAndReturn(run func(*config.Config) string) *MockDeployer_GetSharedModeResourceName_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -721,7 +720,7 @@ func (_c *MockDeployer_GetWorkflowLogsNonStream_Call) RunAndReturn(run func(cont
 }
 
 // InstanceLogs provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) InstanceLogs(ctx context.Context, dr types.DeployRepo) (*deploy.MultiLogReader, error) {
+func (_m *MockDeployer) InstanceLogs(ctx context.Context, dr types.DeployRequest) (*deploy.MultiLogReader, error) {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -730,10 +729,10 @@ func (_m *MockDeployer) InstanceLogs(ctx context.Context, dr types.DeployRepo) (
 
 	var r0 *deploy.MultiLogReader
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) (*deploy.MultiLogReader, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) (*deploy.MultiLogReader, error)); ok {
 		return rf(ctx, dr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) *deploy.MultiLogReader); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) *deploy.MultiLogReader); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		if ret.Get(0) != nil {
@@ -741,7 +740,7 @@ func (_m *MockDeployer) InstanceLogs(ctx context.Context, dr types.DeployRepo) (
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest) error); ok {
 		r1 = rf(ctx, dr)
 	} else {
 		r1 = ret.Error(1)
@@ -757,14 +756,14 @@ type MockDeployer_InstanceLogs_Call struct {
 
 // InstanceLogs is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) InstanceLogs(ctx interface{}, dr interface{}) *MockDeployer_InstanceLogs_Call {
 	return &MockDeployer_InstanceLogs_Call{Call: _e.mock.On("InstanceLogs", ctx, dr)}
 }
 
-func (_c *MockDeployer_InstanceLogs_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_InstanceLogs_Call {
+func (_c *MockDeployer_InstanceLogs_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_InstanceLogs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -774,7 +773,99 @@ func (_c *MockDeployer_InstanceLogs_Call) Return(_a0 *deploy.MultiLogReader, _a1
 	return _c
 }
 
-func (_c *MockDeployer_InstanceLogs_Call) RunAndReturn(run func(context.Context, types.DeployRepo) (*deploy.MultiLogReader, error)) *MockDeployer_InstanceLogs_Call {
+func (_c *MockDeployer_InstanceLogs_Call) RunAndReturn(run func(context.Context, types.DeployRequest) (*deploy.MultiLogReader, error)) *MockDeployer_InstanceLogs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsDefaultScheduler provides a mock function with no fields
+func (_m *MockDeployer) IsDefaultScheduler() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsDefaultScheduler")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockDeployer_IsDefaultScheduler_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsDefaultScheduler'
+type MockDeployer_IsDefaultScheduler_Call struct {
+	*mock.Call
+}
+
+// IsDefaultScheduler is a helper method to define mock.On call
+func (_e *MockDeployer_Expecter) IsDefaultScheduler() *MockDeployer_IsDefaultScheduler_Call {
+	return &MockDeployer_IsDefaultScheduler_Call{Call: _e.mock.On("IsDefaultScheduler")}
+}
+
+func (_c *MockDeployer_IsDefaultScheduler_Call) Run(run func()) *MockDeployer_IsDefaultScheduler_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeployer_IsDefaultScheduler_Call) Return(_a0 bool) *MockDeployer_IsDefaultScheduler_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockDeployer_IsDefaultScheduler_Call) RunAndReturn(run func() bool) *MockDeployer_IsDefaultScheduler_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LabelNode provides a mock function with given fields: ctx, req
+func (_m *MockDeployer) LabelNode(ctx context.Context, req *types.NodeLabel) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LabelNode")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.NodeLabel) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockDeployer_LabelNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LabelNode'
+type MockDeployer_LabelNode_Call struct {
+	*mock.Call
+}
+
+// LabelNode is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *types.NodeLabel
+func (_e *MockDeployer_Expecter) LabelNode(ctx interface{}, req interface{}) *MockDeployer_LabelNode_Call {
+	return &MockDeployer_LabelNode_Call{Call: _e.mock.On("LabelNode", ctx, req)}
+}
+
+func (_c *MockDeployer_LabelNode_Call) Run(run func(ctx context.Context, req *types.NodeLabel)) *MockDeployer_LabelNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*types.NodeLabel))
+	})
+	return _c
+}
+
+func (_c *MockDeployer_LabelNode_Call) Return(_a0 error) *MockDeployer_LabelNode_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockDeployer_LabelNode_Call) RunAndReturn(run func(context.Context, *types.NodeLabel) error) *MockDeployer_LabelNode_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -838,7 +929,7 @@ func (_c *MockDeployer_ListCluster_Call) RunAndReturn(run func(context.Context) 
 }
 
 // Logs provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Logs(ctx context.Context, dr types.DeployRepo) (*deploy.MultiLogReader, error) {
+func (_m *MockDeployer) Logs(ctx context.Context, dr types.DeployRequest) (*deploy.MultiLogReader, error) {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -847,10 +938,10 @@ func (_m *MockDeployer) Logs(ctx context.Context, dr types.DeployRepo) (*deploy.
 
 	var r0 *deploy.MultiLogReader
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) (*deploy.MultiLogReader, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) (*deploy.MultiLogReader, error)); ok {
 		return rf(ctx, dr)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) *deploy.MultiLogReader); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) *deploy.MultiLogReader); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		if ret.Get(0) != nil {
@@ -858,7 +949,7 @@ func (_m *MockDeployer) Logs(ctx context.Context, dr types.DeployRepo) (*deploy.
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest) error); ok {
 		r1 = rf(ctx, dr)
 	} else {
 		r1 = ret.Error(1)
@@ -874,14 +965,14 @@ type MockDeployer_Logs_Call struct {
 
 // Logs is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Logs(ctx interface{}, dr interface{}) *MockDeployer_Logs_Call {
 	return &MockDeployer_Logs_Call{Call: _e.mock.On("Logs", ctx, dr)}
 }
 
-func (_c *MockDeployer_Logs_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Logs_Call {
+func (_c *MockDeployer_Logs_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Logs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -891,13 +982,13 @@ func (_c *MockDeployer_Logs_Call) Return(_a0 *deploy.MultiLogReader, _a1 error) 
 	return _c
 }
 
-func (_c *MockDeployer_Logs_Call) RunAndReturn(run func(context.Context, types.DeployRepo) (*deploy.MultiLogReader, error)) *MockDeployer_Logs_Call {
+func (_c *MockDeployer_Logs_Call) RunAndReturn(run func(context.Context, types.DeployRequest) (*deploy.MultiLogReader, error)) *MockDeployer_Logs_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Purge provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Purge(ctx context.Context, dr types.DeployRepo) error {
+func (_m *MockDeployer) Purge(ctx context.Context, dr types.DeployRequest) error {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -905,7 +996,7 @@ func (_m *MockDeployer) Purge(ctx context.Context, dr types.DeployRepo) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) error); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Error(0)
@@ -921,14 +1012,14 @@ type MockDeployer_Purge_Call struct {
 
 // Purge is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Purge(ctx interface{}, dr interface{}) *MockDeployer_Purge_Call {
 	return &MockDeployer_Purge_Call{Call: _e.mock.On("Purge", ctx, dr)}
 }
 
-func (_c *MockDeployer_Purge_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Purge_Call {
+func (_c *MockDeployer_Purge_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Purge_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -938,7 +1029,7 @@ func (_c *MockDeployer_Purge_Call) Return(err error) *MockDeployer_Purge_Call {
 	return _c
 }
 
-func (_c *MockDeployer_Purge_Call) RunAndReturn(run func(context.Context, types.DeployRepo) error) *MockDeployer_Purge_Call {
+func (_c *MockDeployer_Purge_Call) RunAndReturn(run func(context.Context, types.DeployRequest) error) *MockDeployer_Purge_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -991,7 +1082,7 @@ func (_c *MockDeployer_StartDeploy_Call) RunAndReturn(run func(context.Context, 
 }
 
 // Status provides a mock function with given fields: ctx, dr, needDetails
-func (_m *MockDeployer) Status(ctx context.Context, dr types.DeployRepo, needDetails bool) (string, int, []types.Instance, error) {
+func (_m *MockDeployer) Status(ctx context.Context, dr types.DeployRequest, needDetails bool) (string, int, []types.Instance, error) {
 	ret := _m.Called(ctx, dr, needDetails)
 
 	if len(ret) == 0 {
@@ -1002,22 +1093,22 @@ func (_m *MockDeployer) Status(ctx context.Context, dr types.DeployRepo, needDet
 	var r1 int
 	var r2 []types.Instance
 	var r3 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo, bool) (string, int, []types.Instance, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest, bool) (string, int, []types.Instance, error)); ok {
 		return rf(ctx, dr, needDetails)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo, bool) string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest, bool) string); ok {
 		r0 = rf(ctx, dr, needDetails)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRepo, bool) int); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, types.DeployRequest, bool) int); ok {
 		r1 = rf(ctx, dr, needDetails)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, types.DeployRepo, bool) []types.Instance); ok {
+	if rf, ok := ret.Get(2).(func(context.Context, types.DeployRequest, bool) []types.Instance); ok {
 		r2 = rf(ctx, dr, needDetails)
 	} else {
 		if ret.Get(2) != nil {
@@ -1025,7 +1116,7 @@ func (_m *MockDeployer) Status(ctx context.Context, dr types.DeployRepo, needDet
 		}
 	}
 
-	if rf, ok := ret.Get(3).(func(context.Context, types.DeployRepo, bool) error); ok {
+	if rf, ok := ret.Get(3).(func(context.Context, types.DeployRequest, bool) error); ok {
 		r3 = rf(ctx, dr, needDetails)
 	} else {
 		r3 = ret.Error(3)
@@ -1041,15 +1132,15 @@ type MockDeployer_Status_Call struct {
 
 // Status is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 //   - needDetails bool
 func (_e *MockDeployer_Expecter) Status(ctx interface{}, dr interface{}, needDetails interface{}) *MockDeployer_Status_Call {
 	return &MockDeployer_Status_Call{Call: _e.mock.On("Status", ctx, dr, needDetails)}
 }
 
-func (_c *MockDeployer_Status_Call) Run(run func(ctx context.Context, dr types.DeployRepo, needDetails bool)) *MockDeployer_Status_Call {
+func (_c *MockDeployer_Status_Call) Run(run func(ctx context.Context, dr types.DeployRequest, needDetails bool)) *MockDeployer_Status_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo), args[2].(bool))
+		run(args[0].(context.Context), args[1].(types.DeployRequest), args[2].(bool))
 	})
 	return _c
 }
@@ -1059,13 +1150,13 @@ func (_c *MockDeployer_Status_Call) Return(srvName string, status int, instances
 	return _c
 }
 
-func (_c *MockDeployer_Status_Call) RunAndReturn(run func(context.Context, types.DeployRepo, bool) (string, int, []types.Instance, error)) *MockDeployer_Status_Call {
+func (_c *MockDeployer_Status_Call) RunAndReturn(run func(context.Context, types.DeployRequest, bool) (string, int, []types.Instance, error)) *MockDeployer_Status_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Stop provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Stop(ctx context.Context, dr types.DeployRepo) error {
+func (_m *MockDeployer) Stop(ctx context.Context, dr types.DeployRequest) error {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -1073,7 +1164,7 @@ func (_m *MockDeployer) Stop(ctx context.Context, dr types.DeployRepo) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) error); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Error(0)
@@ -1089,14 +1180,14 @@ type MockDeployer_Stop_Call struct {
 
 // Stop is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Stop(ctx interface{}, dr interface{}) *MockDeployer_Stop_Call {
 	return &MockDeployer_Stop_Call{Call: _e.mock.On("Stop", ctx, dr)}
 }
 
-func (_c *MockDeployer_Stop_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Stop_Call {
+func (_c *MockDeployer_Stop_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Stop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -1106,7 +1197,7 @@ func (_c *MockDeployer_Stop_Call) Return(err error) *MockDeployer_Stop_Call {
 	return _c
 }
 
-func (_c *MockDeployer_Stop_Call) RunAndReturn(run func(context.Context, types.DeployRepo) error) *MockDeployer_Stop_Call {
+func (_c *MockDeployer_Stop_Call) RunAndReturn(run func(context.Context, types.DeployRequest) error) *MockDeployer_Stop_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1384,7 +1475,7 @@ func (_c *MockDeployer_UpdateDeploy_Call) RunAndReturn(run func(context.Context,
 }
 
 // Wakeup provides a mock function with given fields: ctx, dr
-func (_m *MockDeployer) Wakeup(ctx context.Context, dr types.DeployRepo) error {
+func (_m *MockDeployer) Wakeup(ctx context.Context, dr types.DeployRequest) error {
 	ret := _m.Called(ctx, dr)
 
 	if len(ret) == 0 {
@@ -1392,7 +1483,7 @@ func (_m *MockDeployer) Wakeup(ctx context.Context, dr types.DeployRepo) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRepo) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, types.DeployRequest) error); ok {
 		r0 = rf(ctx, dr)
 	} else {
 		r0 = ret.Error(0)
@@ -1408,14 +1499,14 @@ type MockDeployer_Wakeup_Call struct {
 
 // Wakeup is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dr types.DeployRepo
+//   - dr types.DeployRequest
 func (_e *MockDeployer_Expecter) Wakeup(ctx interface{}, dr interface{}) *MockDeployer_Wakeup_Call {
 	return &MockDeployer_Wakeup_Call{Call: _e.mock.On("Wakeup", ctx, dr)}
 }
 
-func (_c *MockDeployer_Wakeup_Call) Run(run func(ctx context.Context, dr types.DeployRepo)) *MockDeployer_Wakeup_Call {
+func (_c *MockDeployer_Wakeup_Call) Run(run func(ctx context.Context, dr types.DeployRequest)) *MockDeployer_Wakeup_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(types.DeployRepo))
+		run(args[0].(context.Context), args[1].(types.DeployRequest))
 	})
 	return _c
 }
@@ -1425,7 +1516,7 @@ func (_c *MockDeployer_Wakeup_Call) Return(err error) *MockDeployer_Wakeup_Call 
 	return _c
 }
 
-func (_c *MockDeployer_Wakeup_Call) RunAndReturn(run func(context.Context, types.DeployRepo) error) *MockDeployer_Wakeup_Call {
+func (_c *MockDeployer_Wakeup_Call) RunAndReturn(run func(context.Context, types.DeployRequest) error) *MockDeployer_Wakeup_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -15,6 +15,7 @@ import (
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/types"
+	"opencsg.com/csghub-server/common/utils/common"
 	"opencsg.com/csghub-server/component"
 )
 
@@ -115,23 +116,36 @@ func (r *RProxyHandler) checkAccessPermission(ctx *gin.Context, deploy *database
 		err   error
 		space *database.Space
 	)
-	if deploy.SpaceID > 0 {
-		space, err = r.spaceComp.GetByID(ctx.Request.Context(), deploy.SpaceID)
-		if err != nil {
-			slog.ErrorContext(ctx.Request.Context(), "failed to get space by id", slog.Any("spaceID", deploy.SpaceID), slog.Any("error", err))
-			return false, fmt.Errorf("failed to get space, %w", err)
-		}
-		// user must login to visit space except mcp server
-		if space.Sdk != types.MCPSERVER.Name && httpbase.GetAuthType(ctx) != httpbase.AuthTypeJwt {
-			slog.ErrorContext(ctx.Request.Context(), "invalid auth type in proxy", slog.Any("AuthType(ctx)", httpbase.GetAuthType(ctx)), slog.Any("URI", ctx.Request.RequestURI))
-			return false, ErrUnauthorized
-		}
-		// check space
-		allow, err = r.repoComp.AllowAccessByRepoID(ctx.Request.Context(), deploy.RepoID, username)
-	} else {
-		// check endpoint
+
+	if deploy.SpaceID < 1 {
+		// check endpoint for non-space deploy
 		allow, err = r.repoComp.AllowAccessEndpoint(ctx.Request.Context(), username, deploy)
+		return allow, err
 	}
+
+	// get space for deploy
+	space, err = r.spaceComp.GetByID(ctx.Request.Context(), deploy.SpaceID)
+	if err != nil {
+		slog.ErrorContext(ctx.Request.Context(), "failed to get space by id", slog.Any("spaceID", deploy.SpaceID), slog.Any("error", err))
+		return false, fmt.Errorf("failed to get space, %w", err)
+	}
+
+	if space.Sdk == types.MCPSERVER.Name {
+		// check endpoint for mcp type space deploy
+		allow, err = r.repoComp.AllowAccessEndpoint(ctx.Request.Context(), username, deploy)
+		return allow, err
+	}
+
+	// user must login to visit space
+	authType := httpbase.GetAuthType(ctx)
+	if authType != httpbase.AuthTypeJwt && authType != httpbase.AuthTypeAccessToken {
+		slog.ErrorContext(ctx.Request.Context(), "invalid auth type in proxy", slog.Any("AuthType(ctx)", authType), slog.Any("URI", ctx.Request.RequestURI))
+		return false, ErrUnauthorized
+	}
+
+	// check non-mcp-type space deploy permission
+	allow, err = r.repoComp.AllowAccessByRepoID(ctx.Request.Context(), deploy.RepoID, username)
+
 	return allow, err
 }
 
@@ -175,6 +189,11 @@ func (r *RProxyHandler) getSvcTargetAddress(ctx context.Context, appSvcName stri
 		SvcName:   appSvcName,
 	}
 
-	target, host, err := component.ExtractDeployTargetAndHost(ctx, r.clusterComp, req)
+	cluster, err := r.clusterComp.GetClusterByID(ctx, req.ClusterID)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get cluster by id %s, error: %w", req.ClusterID, err)
+	}
+
+	target, host, err = common.ExtractDeployTargetAndHost(ctx, cluster, req)
 	return target, host, err
 }

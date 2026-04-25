@@ -44,6 +44,7 @@ type mockedComponents struct {
 	space               *mock_component.MockSpaceComponent
 	runtimeArchitecture *mock_component.MockRuntimeArchitectureComponent
 	sensitive           *mock_component.MockSensitiveComponent
+	cluster             *mock_component.MockClusterComponent
 }
 
 var MockedStoreSet = wire.NewSet(
@@ -69,6 +70,8 @@ var MockedComponentSet = wire.NewSet(
 	wire.Bind(new(SpaceTemplateComponent), new(*mock_component.MockSpaceTemplateComponent)),
 	mock_component.NewMockMCPServerComponent,
 	wire.Bind(new(MCPServerComponent), new(*mock_component.MockMCPServerComponent)),
+	mock_component.NewMockClusterComponent,
+	wire.Bind(new(ClusterComponent), new(*mock_component.MockClusterComponent)),
 )
 
 var MockedGitServerSet = wire.NewSet(
@@ -152,7 +155,21 @@ var MockedCheckerSet = wire.NewSet(
 )
 
 func ProvideTestConfig() *config.Config {
-	return &config.Config{}
+	return &config.Config{
+		S3: struct {
+			AccessKeyID     string `env:"STARHUB_SERVER_S3_ACCESS_KEY_ID"`
+			AccessKeySecret string `env:"STARHUB_SERVER_S3_ACCESS_KEY_SECRET"`
+			Region          string `env:"STARHUB_SERVER_S3_REGION"`
+			Endpoint        string `env:"STARHUB_SERVER_S3_ENDPOINT" default:"localhost:9000"`
+			InternalEndpoint string `env:"STARHUB_SERVER_S3_INTERNAL_ENDPOINT"`
+			Bucket           string `env:"STARHUB_SERVER_S3_BUCKET" default:"opencsg-test"`
+			EnableSSL        bool   `env:"STARHUB_SERVER_S3_ENABLE_SSL" default:"false"`
+			BucketLookup string `env:"STARHUB_SERVER_S3_BUCKET_LOOKUP" default:"auto"`
+			PublicBucket string `env:"STARHUB_SERVER_S3_PUBLIC_BUCKET" default:"opencsg-public-resource"`
+		}{
+			Bucket: "test-bucket",
+		},
+	}
 }
 
 var RepoComponentSet = wire.NewSet(NewTestRepoComponent)
@@ -208,6 +225,7 @@ func NewTestUserComponent(
 		promptStore:         stores.Prompt,
 		workflowStore:       stores.Workflow,
 		mcpServerStore:      stores.MCPServerStore,
+		skillStore:          stores.Skill,
 	}
 }
 
@@ -225,6 +243,7 @@ func NewTestModelComponent(
 	runtimeArchComponent RuntimeArchitectureComponent,
 	gitServer gitserver.GitServer,
 	userSvcClient rpc.UserSvcClient,
+	clusterComponent ClusterComponent,
 ) *modelComponentImpl {
 	config.APIServer.PublicDomain = "https://foo.com"
 	config.APIServer.SSHDomain = "ssh://test@127.0.0.1"
@@ -251,6 +270,7 @@ func NewTestModelComponent(
 		runtimeArchitecturesStore: stores.RuntimeArch,
 		mirrorStore:               stores.Mirror,
 		lfsMetaObjectStore:        stores.LfsMetaObject,
+		clusterComponent:          clusterComponent,
 	}
 }
 
@@ -260,6 +280,9 @@ func NewTestAccountingComponent(stores *tests.MockStores, accountingClient accou
 	return &accountingComponentImpl{
 		accountingClient: accountingClient,
 		userStore:        stores.User,
+		orgStore:         stores.Org,
+		namespaceStore:   stores.Namespace,
+		memberStore:      stores.Member,
 		deployTaskStore:  stores.DeployTask,
 	}
 }
@@ -399,7 +422,22 @@ func NewTestCodeComponent(config *config.Config, stores *tests.MockStores, repoC
 	}
 }
 
+func NewTestSkillComponent(config *config.Config, stores *tests.MockStores, repoComponent RepoComponent, userSvcClient rpc.UserSvcClient, gitServer gitserver.GitServer, s3Client s3.Client) *skillComponentImpl {
+	return &skillComponentImpl{
+		config:         config,
+		repoComponent:  repoComponent,
+		skillStore:     stores.Skill,
+		repoStore:      stores.Repo,
+		userLikesStore: stores.UserLikes,
+		gitServer:      gitServer,
+		userSvcClient:  userSvcClient,
+		recomStore:     stores.Recom,
+		s3Client:       s3Client,
+	}
+}
+
 var CodeComponentSet = wire.NewSet(NewTestCodeComponent)
+var SkillComponentSet = wire.NewSet(NewTestSkillComponent)
 
 func NewTestMultiSyncComponent(config *config.Config, stores *tests.MockStores, gitServer gitserver.GitServer) *multiSyncComponentImpl {
 	return &multiSyncComponentImpl{
@@ -413,6 +451,10 @@ func NewTestMultiSyncComponent(config *config.Config, stores *tests.MockStores, 
 		syncVersionStore: stores.SyncVersion,
 		tagStore:         stores.Tag,
 		fileStore:        stores.File,
+		codeStore:        stores.Code,
+		promptStore:      stores.Prompt,
+		mcpStore:         stores.MCPServerStore,
+		skillStore:       stores.Skill,
 		gitServer:        gitServer,
 	}
 }
@@ -489,8 +531,12 @@ var TelemetryComponentSet = wire.NewSet(NewTestTelemetryComponent)
 
 func NewTestClusterComponent(config *config.Config, deployer deploy.Deployer, stores *tests.MockStores) *clusterComponentImpl {
 	return &clusterComponentImpl{
-		deployer:     deployer,
-		clusterStore: stores.ClusterInfo,
+		deployer:        deployer,
+		clusterStore:    stores.ClusterInfo,
+		deployTaskStore: stores.DeployTask,
+		resStore:        stores.SpaceResource,
+		workflowStore:   stores.Workflow,
+		namespaceStore:  stores.Namespace,
 	}
 }
 

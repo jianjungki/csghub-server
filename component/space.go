@@ -98,7 +98,7 @@ func (c *spaceComponentImpl) Create(ctx context.Context, req types.CreateSpaceRe
 	if err != nil {
 		return nil, errorx.ErrResourceNotFound
 	}
-	err = c.repoComponent.CheckAccountAndResource(ctx, req.Username, req.ClusterID, req.OrderDetailID, resource)
+	_, err = c.repoComponent.CheckAccountAndResource(ctx, req.Namespace, req.ClusterID, req.OrderDetailID, resource)
 	if err != nil {
 		slog.ErrorContext(ctx, "CheckAccountAndResource failed", slog.Any("error", err))
 		return nil, err
@@ -390,7 +390,7 @@ func (c *spaceComponentImpl) Show(ctx context.Context, namespace, name, currentU
 
 	instList := []types.Instance{}
 	if spaceStatus.SvcName != "" {
-		req := types.DeployRepo{
+		req := types.DeployRequest{
 			DeployID:  spaceStatus.DeployID,
 			SpaceID:   space.ID,
 			Namespace: namespace,
@@ -460,6 +460,7 @@ func (c *spaceComponentImpl) Show(ctx context.Context, namespace, name, currentU
 		Instances:     instList,
 		ClusterID:     space.ClusterID,
 		MinReplica:    space.MinReplica,
+		DriverVersion: space.DriverVersion,
 	}
 	if permission.CanAdmin {
 		resSpace.SensitiveCheckStatus = space.Repository.SensitiveCheckStatus.String()
@@ -509,6 +510,10 @@ func (c *spaceComponentImpl) Update(ctx context.Context, req *types.UpdateSpaceR
 	err = c.spaceStore.Update(ctx, *space)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update database space, error: %w", err)
+	}
+
+	if req.Private != nil {
+		c.syncCodeAgentIfExists(dbRepo.User.UUID, dbRepo.User.Username, dbRepo.Path, types.CodeAgentSyncOperationVisibility)
 	}
 
 	resDataset := &types.Space{
@@ -944,12 +949,14 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		)
 	}
 
-	// found user id
-	user, err := c.userStore.FindByUsername(ctx, currentUser)
+	// found namespace by org or user path
+	ns, err := c.userSvcClient.GetNameSpaceInfo(ctx, currentUser)
 	if err != nil {
-		slog.Error("can't find user for deploy space", slog.Any("error", err), slog.String("username", currentUser))
+		slog.Error("can't find namespace for deploy space", slog.Any("error", err), slog.String("ns", currentUser))
 		return -1, err
 	}
+
+	userID := space.Repository.UserID
 
 	resID, err := strconv.Atoi(space.SKU)
 	if err != nil {
@@ -960,9 +967,10 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 	if err != nil {
 		return -1, fmt.Errorf("fail to find resource by id %d, error: %w", resID, err)
 	}
-	slog.Info("deploy space with resource", slog.Any("resource", resource),
+
+	slog.Info("deploy space with resource", slog.Any("resource", resource), slog.String("namespace", namespace),
 		slog.String("username", currentUser), slog.Any("cluster_id", resource.ClusterID))
-	err = c.repoComponent.CheckAccountAndResource(ctx, currentUser, resource.ClusterID, 0, resource)
+	exclusiveResp, err := c.repoComponent.CheckAccountAndResource(ctx, namespace, resource.ClusterID, 0, resource)
 	if err != nil {
 		return -1, err
 	}
@@ -971,7 +979,7 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 	annotations := make(map[string]string)
 	annotations[types.ResTypeKey] = string(types.SpaceRepo)
 	annotations[types.ResNameKey] = fmt.Sprintf("%s/%s", namespace, name)
-	annotations[types.ResDeployUser] = user.Username
+	annotations[types.ResDeployUser] = currentUser
 	annoStr, err := json.Marshal(annotations)
 	if err != nil {
 		slog.Error("fail to create annotations for deploy space", slog.Any("error", err), slog.String("username", currentUser))
@@ -1000,9 +1008,10 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 	if space.Sdk != types.DOCKER.Name {
 		var frame *database.RuntimeFramework
 		var err error
+		// check if using old base  space runtime image 1.0.3 for old spaces
 		if (space.Sdk == types.GRADIO.Name && space.SdkVersion != types.GRADIO.Version) ||
 			(space.Sdk == types.STREAMLIT.Name && space.SdkVersion != types.STREAMLIT.Version) {
-			// Using old base image 1.0.3 for old spaces, will be removed in the future
+			slog.InfoContext(ctx, "Using old base image 1.0.3 for old spaces")
 			frame, err = c.rfs.FindByFrameNameAndDriverVersion(ctx, "space", EngineVersion103, space.DriverVersion)
 			if err != nil {
 				return -1, fmt.Errorf("cannot find available (%s) runtime framework, %w", EngineVersion103, err)
@@ -1018,10 +1027,9 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		if frame != nil {
 			imageID = frame.FrameImage
 		}
-
 	}
 	// create deploy for space
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:       space.ID,
 		Path:          space.Repository.Path,
 		GitPath:       space.Repository.GitPath,
@@ -1034,15 +1042,21 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		Secret:        space.Secrets,
 		RepoID:        space.Repository.ID,
 		ModelID:       0,
-		UserID:        user.ID,
+		UserID:        userID,
 		Annotation:    string(annoStr),
 		ImageID:       imageID,
 		Type:          types.SpaceType,
-		UserUUID:      user.UUID,
+		UserUUID:      ns.UUID, // user or org uuid
 		SKU:           space.SKU,
 		ContainerPort: containerPort,
 		Variables:     space.Variables,
 		ClusterID:     space.ClusterID,
+
+		OwnerNamespace: namespace,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: exclusiveResp.NodeAffinity,
+			Tolerations:  exclusiveResp.Tolerations,
+		},
 	}
 	dr = c.updateDeployRepoBySpace(dr, space)
 
@@ -1051,14 +1065,14 @@ func (c *spaceComponentImpl) Deploy(ctx context.Context, namespace, name, curren
 		return -1, err
 	}
 
-	c.syncCodeAgentIfExists(user.UUID, user.Username, space.Repository.Path, types.CodeAgentSyncOperationUpdate)
+	c.syncCodeAgentIfExists(ns.UUID, ns.Path, space.Repository.Path, types.CodeAgentSyncOperationUpdate)
 	return deployID, nil
 }
 
 func (c *spaceComponentImpl) Wakeup(ctx context.Context, namespace, name string) error {
 	s, err := c.spaceStore.FindByPath(ctx, namespace, name)
 	if err != nil {
-		slog.Error("can't wakeup space", slog.Any("error", err), slog.String("namespace", namespace), slog.String("name", name))
+		slog.ErrorContext(ctx, "No space found", slog.Any("error", err), slog.String("namespace", namespace), slog.String("name", name))
 		return err
 	}
 	if !s.HasAppFile {
@@ -1070,13 +1084,15 @@ func (c *spaceComponentImpl) Wakeup(ctx context.Context, namespace, name string)
 	// get latest Deploy for space
 	deploy, err := c.deployTaskStore.GetLatestDeployBySpaceID(ctx, s.ID)
 	if err != nil {
-		return fmt.Errorf("can't get space delopyment,%w", err)
+		return fmt.Errorf("can't get space deployment,%w", err)
 	}
-	return c.deployer.Wakeup(ctx, types.DeployRepo{
+	return c.deployer.Wakeup(ctx, types.DeployRequest{
 		SpaceID:   s.ID,
 		Namespace: namespace,
 		Name:      name,
 		SvcName:   deploy.SvcName,
+		Endpoint:  deploy.Endpoint,
+		ClusterID: deploy.ClusterID,
 	})
 }
 
@@ -1108,7 +1124,7 @@ func (c *spaceComponentImpl) stopSpaceDeploy(ctx context.Context, namespace, nam
 		return fmt.Errorf("can't get space deployment,%w", err)
 	}
 
-	dr := types.DeployRepo{
+	dr := types.DeployRequest{
 		SpaceID:   s.ID,
 		Namespace: namespace,
 		Name:      name,
@@ -1120,7 +1136,7 @@ func (c *spaceComponentImpl) stopSpaceDeploy(ctx context.Context, namespace, nam
 	if deploy.Status == deployCommon.Building {
 		deployTasks, err := c.deployTaskStore.GetDeployTasksOfDeploy(ctx, deploy.ID)
 		if err != nil {
-			return fmt.Errorf("can't get space delopyment,%w", err)
+			return fmt.Errorf("can't get space deployment,%w", err)
 		}
 
 		sort.Slice(deployTasks, func(i, j int) bool {
@@ -1128,7 +1144,7 @@ func (c *spaceComponentImpl) stopSpaceDeploy(ctx context.Context, namespace, nam
 		})
 
 		if len(deployTasks) < 2 {
-			return fmt.Errorf("can't get space delopyment")
+			return fmt.Errorf("can't get space deployment")
 		}
 		buildTask := deployTasks[1]
 
@@ -1187,7 +1203,7 @@ func (c *spaceComponentImpl) status(ctx context.Context, s *database.Space) (typ
 		}, fmt.Errorf("failed to get latest space deploy by space id %d, error: %w", s.ID, err)
 	}
 
-	svcName, statusCode, _, err := c.deployer.Status(ctx, types.DeployRepo{
+	svcName, statusCode, _, err := c.deployer.Status(ctx, types.DeployRequest{
 		DeployID: deploy.ID,
 	}, false)
 	if err != nil {
@@ -1277,7 +1293,7 @@ func (c *spaceComponentImpl) Logs(ctx context.Context, namespace, name, since, i
 	if err != nil {
 		return nil, fmt.Errorf("can't find space for logs, error: %w", err)
 	}
-	return c.deployer.Logs(ctx, types.DeployRepo{
+	return c.deployer.Logs(ctx, types.DeployRequest{
 		SpaceID:   s.ID,
 		Namespace: namespace,
 		Name:      name,
@@ -1356,15 +1372,15 @@ func (c *spaceComponentImpl) mergeUpdateSpaceRequest(ctx context.Context, space 
 			slog.ErrorContext(ctx, "invalid hardware setting", slog.Any("error", err))
 			return fmt.Errorf("invalid hardware setting, %w", err)
 		}
-		_, resourceType := deployCommon.GetResourceAndType(hardware)
-		if resourceType == "" { // only cpu resource
+		resourceType := deployCommon.ResourceType(hardware)
+		if resourceType == types.ResourceTypeCPU { // only cpu resource
 			space.DriverVersion = ""
 		} else {
 			if req.DriverVersion == nil {
 				// set default value(compatible old version) latest cuda version by resocouurce type
-				frame, err := c.FindSpaceLatestCUDAVersion(ctx, resourceType)
+				frame, err := c.FindSpaceLatestCUDAVersion(ctx, string(resourceType))
 				if err != nil {
-					return fmt.Errorf("can't find latest cuda version for space resource, resource type:%s, error:%w", resourceType, err)
+					return fmt.Errorf("can't find latest cuda version for space resource, resource type:%s, error:%w", string(resourceType), err)
 				}
 
 				req.DriverVersion = &frame.DriverVersion
@@ -1510,7 +1526,7 @@ func (c *spaceComponentImpl) GetSupportedCUDAVersions(ctx context.Context, resou
 		return nil, err
 	}
 
-	var versions []string
+	var versions = []string{}
 	for _, frame := range frames {
 		versions = append(versions, frame.DriverVersion)
 	}
@@ -1554,6 +1570,7 @@ func (c *spaceComponentImpl) FindSpaceLatestCUDAVersion(ctx context.Context, com
 const (
 	// SpaceStatusEmpty is the init status by default
 	SpaceStatusEmpty        = ""
+	SpaceStatusPending      = "Pending"
 	SpaceStatusBuilding     = "Building"
 	SpaceStatusBuildFailed  = "BuildingFailed"
 	SpaceStatusDeploying    = "Deploying"

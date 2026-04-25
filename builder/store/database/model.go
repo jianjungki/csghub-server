@@ -220,6 +220,7 @@ func (s *modelStoreImpl) FindByPath(ctx context.Context, namespace string, name 
 		Relation("Repository.Mirror").
 		Relation("Repository.Mirror.CurrentTask").
 		Relation("Repository.Metadata").
+		Relation("Repository.Statistics").
 		Where("repository.path =?", fmt.Sprintf("%s/%s", namespace, name)).
 		Limit(1).
 		Scan(ctx)
@@ -329,7 +330,7 @@ func updateRepoPath(ctx context.Context, tx bun.Tx, repoType types.RepositoryTyp
 		Set("path = ?", repoPath).
 		Set("git_path = ?", fmt.Sprintf("%ss_%s", repoType, repoPath)).
 		Where("id = ?", repoID).
-		Returning("*", &repo).
+		Returning("*").
 		Scan(ctx, &repo)
 	if err != nil {
 		var pqErr pgdriver.Error

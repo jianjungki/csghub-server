@@ -123,13 +123,39 @@ type Config struct {
 	}
 
 	SensitiveCheck struct {
-		Enable          bool   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENABLE" default:"false"`
-		AccessKeyID     string `env:"STARHUB_SERVER_SENSITIVE_CHECK_ACCESS_KEY_ID"`
-		AccessKeySecret string `env:"STARHUB_SERVER_SENSITIVE_CHECK_ACCESS_KEY_SECRET"`
-		Region          string `env:"STARHUB_SERVER_SENSITIVE_CHECK_REGION"`
-		Endpoint        string `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENDPOINT" default:"oss-cn-beijing.aliyuncs.com"`
-		EnableSSL       bool   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENABLE_SSL" default:"true"`
-		DictDir         string `env:"STARHUB_SERVER_SENSITIVE_CHECK_DICT_DIR" default:"/starhub-bin/vocabulary"`
+		Enable              bool     `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENABLE" default:"false"`
+		AccessKeyID         string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ACCESS_KEY_ID"`
+		AccessKeySecret     string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ACCESS_KEY_SECRET"`
+		Region              string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_REGION"`
+		Endpoint            string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENDPOINT" default:"oss-cn-beijing.aliyuncs.com"`
+		EnableSSL           bool     `env:"STARHUB_SERVER_SENSITIVE_CHECK_ENABLE_SSL" default:"true"`
+		DictDir             string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_DICT_DIR" default:"/starhub-bin/vocabulary"`
+		CheckChain          []string `env:"STARHUB_SERVER_SENSITIVE_CHECK_CHECK_CHAIN" default:"[ac_automaton,mutable_ac_automaton,aliyun_green]"`
+		StreamCheckMode     string   `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CHECK_MODE" default:"async"` // sync | async
+		AsyncBufferMaxChars int      `env:"STARHUB_SERVER_SENSITIVE_CHECK_ASYNC_BUFFER_MAX_CHARS" default:"50"`
+		// aliyun green max content length: 2000 | qwen guard max content length: 7000
+		MaxContentLength int `env:"STARHUB_SERVER_SENSITIVE_CHECK_MAX_CONTENT_LENGTH" default:"2000"`
+
+		LLM struct {
+			Enable           bool    `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_ENABLE" default:"false"`
+			Endpoint         string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_ENDPOINT"`
+			APIKey           string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_API_KEY"`
+			GuardModel       string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_GUARD_MODEL" default:"Qwen/Qwen3Guard-Gen-0.6B"`
+			GuardStreamModel string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_GUARD_STREAM_MODEL" default:"Qwen/Qwen3Guard-Gen-Stream-0.6B"`
+			TimeoutMS        int     `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_TIMEOUT_MS" default:"3000"`
+			MaxTokens        int     `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_MAX_TOKENS" default:"128"`
+			Temperature      float64 `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_TEMPERATURE" default:"0"`
+			ResponseMode     string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_RESPONSE_MODE" default:"json_or_text"`
+			SafetyRegex      string  `env:"STARHUB_SERVER_SENSITIVE_CHECK_LLM_SAFETY_REGEX" default:"Safety:\\s*(Safe|Unsafe|Controversial)"`
+		}
+
+		StreamContextCache struct {
+			Enable     bool   `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CONTEXT_CACHE_ENABLE" default:"true"`
+			Backend    string `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CONTEXT_CACHE_BACKEND" default:"memory"` // redis | memory
+			TTLSeconds int    `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CONTEXT_CACHE_TTL_SECONDS" default:"120"`
+			MaxChunks  int    `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CONTEXT_CACHE_MAX_CHUNKS" default:"12"`
+			MaxChars   int    `env:"STARHUB_SERVER_SENSITIVE_CHECK_STREAM_CONTEXT_CACHE_MAX_CHARS" default:"2000"`
+		}
 	}
 
 	JWT struct {
@@ -162,16 +188,18 @@ type Config struct {
 		ReadinessFailureThreshold int    `env:"STARHUB_SERVER_READINESS_FAILURE_THRESHOLD" default:"3"`
 		PYPIIndexURL              string `env:"STARHUB_SERVER_SPACE_PYPI_INDEX_URL" default:""`
 		InformerSyncPeriodInMin   int    `env:"STARHUB_SERVER_SPACE_INFORMER_SYNC_PERIOD_IN_MINUTES" default:"2"`
+		StatusCheckInterval       int    `env:"STARHUB_SERVER_SPACE_STATUS_CHECK_INTERVAL" default:"10"` // 10 seconds
 	}
 
 	Model struct {
-		DeployTimeoutInMin      int    `env:"STARHUB_SERVER_MODEL_DEPLOY_TIMEOUT_IN_MINUTES" default:"60"`
-		DownloadEndpoint        string `env:"STARHUB_SERVER_MODEL_DOWNLOAD_ENDPOINT" default:"https://hub.opencsg.com"`
-		DockerRegBase           string `env:"STARHUB_SERVER_MODEL_DOCKER_REG_BASE" default:"opencsg-registry.cn-beijing.cr.aliyuncs.com"`
-		NimDockerSecretName     string `env:"STARHUB_SERVER_MODEL_NIM_DOCKER_SECRET_NAME" default:"ngc-secret"`
-		NimNGCSecretName        string `env:"STARHUB_SERVER_MODEL_NIM_NGC_SECRET_NAME" default:"nvidia-nim-secrets"`
-		MinContextForEstimation int    `env:"STARHUB_SERVER_MODEL_MIN_CONTEXT_FOR_ESTIMATION" default:"2048"`
-		MinContextForFinetune   int    `env:"STARHUB_SERVER_MODEL_MIN_CONTEXT_FOR_FINETUNE" default:"512"`
+		DeployTimeoutInMin        int    `env:"STARHUB_SERVER_MODEL_DEPLOY_TIMEOUT_IN_MINUTES" default:"60"`
+		DownloadEndpoint          string `env:"STARHUB_SERVER_MODEL_DOWNLOAD_ENDPOINT" default:"https://hub.opencsg.com"`
+		DockerRegBase             string `env:"STARHUB_SERVER_MODEL_DOCKER_REG_BASE" default:"opencsg-registry.cn-beijing.cr.aliyuncs.com"`
+		NimDockerSecretName       string `env:"STARHUB_SERVER_MODEL_NIM_DOCKER_SECRET_NAME" default:"ngc-secret"`
+		NimNGCSecretName          string `env:"STARHUB_SERVER_MODEL_NIM_NGC_SECRET_NAME" default:"nvidia-nim-secrets"`
+		MinContextForEstimation   int    `env:"STARHUB_SERVER_MODEL_MIN_CONTEXT_FOR_ESTIMATION" default:"2048"`
+		MinContextForFinetune     int    `env:"STARHUB_SERVER_MODEL_MIN_CONTEXT_FOR_FINETUNE" default:"512"`
+		DeployStatusCheckInterval int    `env:"STARHUB_SERVER_MODEL_DEPLOY_STATUS_CHECK_INTERVAL" default:"10"` // 10 seconds
 	}
 
 	Search struct {
@@ -219,6 +247,8 @@ type Config struct {
 		SubscriptionCronExpression   string `env:"OPENCSG_ACCOUNTING_SUBSCRIPTION_CRON_EXPRESSION" default:"*/5 * * * *"`
 		ExpiredPresentCronExpression string `env:"OPENCSG_ACCOUNTING_EXPIRED_PRESENT_CRON_EXPRESSION" default:"0 0 * * *"`
 		ThresholdOfStopDeploy        int    `env:"OPENCSG_ACCOUNTING_THRESHOLD_OF_STOP_DEPLOY" default:"5000"`
+		ThresholdOfStopLLMInference  int    `env:"OPENCSG_ACCOUNTING_THRESHOLD_OF_STOP_LLM_INFERENCE" default:"5000"`
+		LLMBalanceCheckCacheTTL      int    `env:"OPENCSG_ACCOUNTING_LLM_BALANCE_CHECK_CACHE_TTL" default:"120"`
 	}
 
 	User struct {
@@ -227,6 +257,19 @@ type Config struct {
 		SigninSuccessRedirectURL       string `env:"OPENCSG_USER_SERVER_SIGNIN_SUCCESS_REDIRECT_URL" default:"http://localhost:3000/server/callback"`
 		CodeSoulerVScodeRedirectURL    string `env:"OPENCSG_USER_SERVER_CODESOULER_VSCODE_REDIRECT_URL" default:"http://127.0.0.1:37678/callback"`
 		CodeSoulerJetBrainsRedirectURL string `env:"OPENCSG_USER_SERVER_CODESOULER_JETBRAINS_REDIRECT_URL" default:"http://127.0.0.1:37679/callback"`
+	}
+
+	Credential struct {
+		// Default decodes to "opencsg-credential-dev-key-00001" for local/dev use; override in production.
+		MasterKeyBase64                  string `env:"OPENCSG_CREDENTIAL_MASTER_KEY_BASE64" default:"b3BlbmNzZy1jcmVkZW50aWFsLWRldi1rZXktMDAwMDE="`
+		SecretBackend                    string `env:"OPENCSG_CREDENTIAL_SECRET_BACKEND" default:"postgres_encrypted"`
+		RuntimeSessionSigningKey         string `env:"OPENCSG_CREDENTIAL_RUNTIME_SESSION_SIGNING_KEY" default:"credential-runtime-signing-key"`
+		RuntimeSessionMaxDurationSeconds int    `env:"OPENCSG_CREDENTIAL_RUNTIME_SESSION_MAX_DURATION_SECONDS" default:"3600"`
+		VaultAddress                     string `env:"OPENCSG_CREDENTIAL_VAULT_ADDRESS" default:""`
+		VaultToken                       string `env:"OPENCSG_CREDENTIAL_VAULT_TOKEN" default:""`
+		VaultNamespace                   string `env:"OPENCSG_CREDENTIAL_VAULT_NAMESPACE" default:""`
+		VaultKVDefaultMount              string `env:"OPENCSG_CREDENTIAL_VAULT_KV_DEFAULT_MOUNT" default:"secret"`
+		VaultTimeoutSeconds              int    `env:"OPENCSG_CREDENTIAL_VAULT_TIMEOUT_SECONDS" default:"5"`
 	}
 
 	MultiSync struct {
@@ -347,6 +390,8 @@ type Config struct {
 		AgentHubServiceToken      string `env:"OPENCSG_AGENT_AGENTHUB_SERVICE_TOKEN" default:""`
 		MCPInspectMaxConcurrency  int    `env:"OPENCSG_AGENT_MCP_INSPECT_MAX_CONCURRENCY" default:"50"`
 		ShareSessionTokenValidDay int    `env:"STARHUB_SERVER_AGENT_SHARE_SESSION_TOKEN_VALIDATE_Day" default:"365"` // 1 year
+		BalanceThreshold          int    `env:"OPENCSG_AGENT_BALANCE_THRESHOLD" default:"5000"`
+		BalanceCheckCacheTTL      int    `env:"OPENCSG_AGENT_BALANCE_CHECK_CACHE_TTL" default:"86400"`
 	}
 
 	DataViewer struct {
@@ -393,7 +438,21 @@ type Config struct {
 	}
 
 	AIGateway struct {
-		Port int `env:"OPENCSG_AIGATEWAY_PORT" default:"8094"`
+		Port                           int    `env:"OPENCSG_AIGATEWAY_PORT" default:"8094"`
+		AdvertiseAddr                  string `env:"OPENCSG_AIGATEWAY_ADVERTISE_ADDR" default:""`
+		ModerationBypassSensitiveCheck bool   `env:"OPENCSG_AIGATEWAY_MODERATION_BYPASS_SENSITIVE_CHECK" default:"false"`
+		SensitiveDefaultImg            string `env:"STARHUB_SERVER_AIGATEWAY_SENSITIVE_DEFAULT_IMG" default:""`
+		PresignExpirySeconds           int    `env:"OPENCSG_AIGATEWAY_PRESIGN_EXPIRY" default:"86400"`
+		EnableLLMLog                   bool   `env:"OPENCSG_AIGATEWAY_LLMLOG_ENABLE" default:"true"`
+		ModelIDFmt                     string `env:"OPENCSG_AIGATEWAY_MODEL_ID_FMT" default:"%s(%s)"`
+	}
+
+	LLMLog struct {
+		Bucket               string `env:"OPENCSG_LLMLOG_BUCKET" default:"opencsg-inference-logs"`
+		Prefix               string `env:"OPENCSG_LLMLOG_PREFIX" default:"llmlog"`
+		WorkerNum            int    `env:"OPENCSG_LLMLOG_WORKER_NUM" default:"10"`
+		BatchSize            int    `env:"OPENCSG_LLMLOG_BATCH_SIZE" default:"1000"`
+		FlushIntervalSeconds int    `env:"OPENCSG_LLMLOG_FLUSH_INTERVAL_SECONDS" default:"300"`
 	}
 
 	Integration struct {
@@ -415,38 +474,47 @@ type Config struct {
 	}
 
 	Notification struct {
-		Port                                int    `env:"STARHUB_SERVER_NOTIFIER_PORT" default:"8095"`
-		Host                                string `env:"STARHUB_SERVER_NOTIFIER_HOST" default:"http://localhost"`
-		MailerHost                          string `env:"STARHUB_SERVER_MAILER_HOST" default:"smtp.qiye.aliyun.com"`
-		MailerPort                          int    `env:"STARHUB_SERVER_MAILER_PORT" default:"465"`
-		MailerUsername                      string `env:"STARHUB_SERVER_MAILER_USERNAME" default:""`
-		MailerPassword                      string `env:"STARHUB_SERVER_MAILER_PASSWORD" default:""`
-		DirectMailEnabled                   bool   `env:"STARHUB_SERVER_DIRECT_MAIL_ENABLED" default:"false"`
-		DirectMailAccessKeyID               string `env:"STARHUB_SERVER_DIRECT_MAIL_ACCESS_KEY_ID" default:""`
-		DirectMailAccessKeySecret           string `env:"STARHUB_SERVER_DIRECT_MAIL_ACCESS_KEY_SECRET" default:""`
-		DirectMailEndpoint                  string `env:"STARHUB_SERVER_DIRECT_MAIL_ENDPOINT" default:"dm.aliyuncs.com"`
-		DirectMailRegionId                  string `env:"STARHUB_SERVER_DIRECT_MAIL_REGION_ID" default:"cn-hangzhou"`
-		MailerRechargeAdmin                 string `env:"STARHUB_SERVER_MAILER_RECHARGE_ADMIN" default:"contact@opencsg.com"`
-		MailerWeeklyRechargesMail           string `env:"STARHUB_SERVER_MAILER_WEEKLY_RECHARGES_MAIL" default:"reconcile@opencsg.com"`
-		EmailInvoiceCreatedReceiver         string `env:"STARHUB_SERVER_EMAIL_INVOICE_CREATED_RECEIVER" default:"contact@opencsg.com"`
-		RepoSyncTimezone                    string `env:"STARHUB_SERVER_REPO_SYNC_TIMEZONE" default:"Asia/Shanghai"`
-		RepoSyncChatID                      string `env:"STARHUB_SERVER_REPO_SYNC_CHAT_ID" default:""`
-		NotificationRetryCount              int    `env:"STARHUB_SERVER_NOTIFIER_NOTIFICATION_RETRY_COUNT" default:"3"`
-		BroadcastUserPageSize               int    `env:"STARHUB_SERVER_NOTIFIER_BROADCAST_USER_PAGE_SIZE" default:"100"`
-		BroadcastEmailPageSize              int    `env:"STARHUB_SERVER_NOTIFIER_BROADCAST_EMAIL_PAGE_SIZE" default:"100"`
-		MsgDispatcherCount                  int    `env:"STARHUB_SERVER_NOTIFIER_MSG_DISPATCHER_COUNT" default:"20"`
-		HighPriorityMsgBufferSize           int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_BUFFER_SIZE" default:"100"`
-		NormalPriorityMsgBufferSize         int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_BUFFER_SIZE" default:"50"`
-		HighPriorityMsgAckWait              int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_ACK_WAIT" default:"60"`
-		NormalPriorityMsgAckWait            int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_ACK_WAIT" default:"60"`
-		HighPriorityMsgMaxDeliver           int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_MAX_DELIVER" default:"6"`
-		NormalPriorityMsgMaxDeliver         int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_MAX_DELIVER" default:"6"`
-		DeduplicateWindow                   int    `env:"STARHUB_SERVER_NOTIFIER_DEDUPLICATE_WINDOW" default:"5"` // 5 seconds
+		Port                        int    `env:"STARHUB_SERVER_NOTIFIER_PORT" default:"8095"`
+		Host                        string `env:"STARHUB_SERVER_NOTIFIER_HOST" default:"http://localhost"`
+		MailerHost                  string `env:"STARHUB_SERVER_MAILER_HOST" default:"smtp.qiye.aliyun.com"`
+		MailerPort                  int    `env:"STARHUB_SERVER_MAILER_PORT" default:"465"`
+		MailerUsername              string `env:"STARHUB_SERVER_MAILER_USERNAME" default:""`
+		MailerPassword              string `env:"STARHUB_SERVER_MAILER_PASSWORD" default:""`
+		DirectMailEnabled           bool   `env:"STARHUB_SERVER_DIRECT_MAIL_ENABLED" default:"false"`
+		DirectMailAccessKeyID       string `env:"STARHUB_SERVER_DIRECT_MAIL_ACCESS_KEY_ID" default:""`
+		DirectMailAccessKeySecret   string `env:"STARHUB_SERVER_DIRECT_MAIL_ACCESS_KEY_SECRET" default:""`
+		DirectMailEndpoint          string `env:"STARHUB_SERVER_DIRECT_MAIL_ENDPOINT" default:"dm.aliyuncs.com"`
+		DirectMailRegionId          string `env:"STARHUB_SERVER_DIRECT_MAIL_REGION_ID" default:"cn-hangzhou"`
+		MailerRechargeAdmin         string `env:"STARHUB_SERVER_MAILER_RECHARGE_ADMIN" default:"contact@opencsg.com"`
+		MailerWeeklyRechargesMail   string `env:"STARHUB_SERVER_MAILER_WEEKLY_RECHARGES_MAIL" default:"reconcile@opencsg.com"`
+		EmailInvoiceCreatedReceiver string `env:"STARHUB_SERVER_EMAIL_INVOICE_CREATED_RECEIVER" default:"contact@opencsg.com"`
+		RepoSyncTimezone            string `env:"STARHUB_SERVER_REPO_SYNC_TIMEZONE" default:"Asia/Shanghai"`
+		RepoSyncChatID              string `env:"STARHUB_SERVER_REPO_SYNC_CHAT_ID" default:""`
+		NotificationRetryCount      int    `env:"STARHUB_SERVER_NOTIFIER_NOTIFICATION_RETRY_COUNT" default:"3"`
+		BroadcastUserPageSize       int    `env:"STARHUB_SERVER_NOTIFIER_BROADCAST_USER_PAGE_SIZE" default:"100"`
+		BroadcastEmailPageSize      int    `env:"STARHUB_SERVER_NOTIFIER_BROADCAST_EMAIL_PAGE_SIZE" default:"100"`
+		MsgDispatcherCount          int    `env:"STARHUB_SERVER_NOTIFIER_MSG_DISPATCHER_COUNT" default:"20"`
+		HighPriorityMsgBufferSize   int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_BUFFER_SIZE" default:"100"`
+		NormalPriorityMsgBufferSize int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_BUFFER_SIZE" default:"50"`
+		HighPriorityMsgAckWait      int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_ACK_WAIT" default:"60"`
+		NormalPriorityMsgAckWait    int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_ACK_WAIT" default:"60"`
+		HighPriorityMsgMaxDeliver   int    `env:"STARHUB_SERVER_NOTIFIER_HIGH_PRIORITY_MSG_MAX_DELIVER" default:"6"`
+		NormalPriorityMsgMaxDeliver int    `env:"STARHUB_SERVER_NOTIFIER_NORMAL_PRIORITY_MSG_MAX_DELIVER" default:"6"`
+		DeduplicateWindow           int    `env:"STARHUB_SERVER_NOTIFIER_DEDUPLICATE_WINDOW" default:"5"` // 5 seconds
+
+		// SMS Provider Configuration
+		SMSProvider string `env:"STARHUB_SERVER_NOTIFIER_SMS_PROVIDER" default:"aliyun"` // aliyun, tencent, huawei
+
 		SMSSign                             string `env:"STARHUB_SERVER_NOTIFIER_SMS_SIGN" default:""`
-		SMSAccessKeyID                      string `env:"STARHUB_SERVER_NOTIFIER_SMS_ACCESS_KEY_ID" default:""`
-		SMSAccessKeySecret                  string `env:"STARHUB_SERVER_NOTIFIER_SMS_ACCESS_KEY_SECRET" default:""`
 		SMSTemplateCodeForVerifyCodeCN      string `env:"STARHUB_SERVER_NOTIFIER_SMS_TEMPLATE_CODE_FOR_VERIFY_CODE_CN" default:""`
 		SMSTemplateCodeForVerifyCodeOversea string `env:"STARHUB_SERVER_NOTIFIER_SMS_TEMPLATE_CODE_FOR_VERIFY_CODE_OVERSEA" default:""`
+
+		// Alibaba Cloud SMS Configuration (Backward Compatibility)
+		SMSAccessKeyID     string `env:"STARHUB_SERVER_NOTIFIER_SMS_ACCESS_KEY_ID"`
+		SMSAccessKeySecret string `env:"STARHUB_SERVER_NOTIFIER_SMS_ACCESS_KEY_SECRET"`
+		SMSRegion          string `env:"STARHUB_SERVER_NOTIFIER_SMS_REGION" default:"ap-guangzhou"`
+		SMSEndpoint        string `env:"STARHUB_SERVER_NOTIFIER_SMS_ENDPOINT"`
+		SMSAppID           string `env:"STARHUB_SERVER_NOTIFIER_SMS_APP_ID"` // Tencent SdkAppId / Huawei ProjectId
 	}
 
 	Prometheus struct {
@@ -523,6 +591,7 @@ type Config struct {
 		MaxConcurrentActivityExecutionSize      int `env:"OPENCSG_TEMPORAL_MAX_CONCURRENT_ACTIVITY_EXECUTION_SIZE" default:"5"`
 		MaxConcurrentLocalActivityExecutionSize int `env:"OPENCSG_TEMPORAL_MAX_CONCURRENT_LOCAL_ACTIVITY_EXECUTION_SIZE" default:"10"`
 		MaxConcurrentWorkflowTaskExecutionSize  int `env:"OPENCSG_TEMPORAL_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTION_SIZE" default:"50"`
+		GetSystemInfoTimeout                    int `env:"OPENCSG_TEMPORAL_GET_SYSTEM_INFO_TIMEOUT" default:"5"`
 	}
 
 	APIRateLimiter struct {
@@ -613,6 +682,7 @@ func loadConfig() (*Config, error) {
 	if len(cfg.UniqueServiceName) < 1 {
 		cfg.UniqueServiceName = genServiceName()
 	}
+
 	return cfg, err
 }
 

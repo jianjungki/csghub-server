@@ -11,6 +11,7 @@ import (
 
 	"opencsg.com/csghub-server/builder/deploy"
 	"opencsg.com/csghub-server/builder/deploy/common"
+	"opencsg.com/csghub-server/builder/git/membership"
 	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/config"
 	"opencsg.com/csghub-server/common/errorx"
@@ -54,10 +55,23 @@ type notebookComponentImpl struct {
 }
 
 func (c *notebookComponentImpl) CreateNotebook(ctx context.Context, req *types.CreateNotebookReq) (*types.NotebookRes, error) {
-	// found user id
+	if req.OwnerNamespace == "" {
+		req.OwnerNamespace = req.CurrentUser
+	}
+
 	user, err := c.userStore.FindByUsername(ctx, req.CurrentUser)
 	if err != nil {
 		return nil, fmt.Errorf("cannot find user for notebook creation, %w", err)
+	}
+
+	if !user.CanAdmin() {
+		canWrite, err := c.repoComponent.CheckCurrentUserPermission(ctx, req.CurrentUser, req.OwnerNamespace, membership.RoleWrite)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check namespace permission, error: %w", err)
+		}
+		if !canWrite {
+			return nil, errorx.ErrForbiddenMsg("users do not have permission to create notebook in this namespace")
+		}
 	}
 
 	frame, err := c.runtimeFrameworksStore.FindEnabledByID(ctx, req.RuntimeFrameworkID)
@@ -80,7 +94,7 @@ func (c *notebookComponentImpl) CreateNotebook(ctx context.Context, req *types.C
 
 	// resource available only if err is nil, err message should contain
 	// the reason why resource is unavailable
-	err = c.repoComponent.CheckAccountAndResource(ctx, req.CurrentUser, resource.ClusterID, req.OrderDetailID, resource)
+	exclusiveResp, err := c.repoComponent.CheckAccountAndResource(ctx, req.OwnerNamespace, resource.ClusterID, req.OrderDetailID, resource)
 	if err != nil {
 		return nil, err
 	}
@@ -97,8 +111,16 @@ func (c *notebookComponentImpl) CreateNotebook(ctx context.Context, req *types.C
 		return nil, errorx.ErrMultiHostNotebookNotSupported
 	}
 
-	// create deploy for notebook
-	dp := types.DeployRepo{
+	billingUUID := user.UUID
+	if req.OwnerNamespace != req.CurrentUser {
+		resolved, err := c.repoComponent.GetNamespaceBillingUUID(ctx, req.OwnerNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve billing UUID for namespace %s, error: %w", req.OwnerNamespace, err)
+		}
+		billingUUID = resolved
+	}
+
+	dp := types.DeployRequest{
 		DeployName:       req.DeployName,
 		SpaceID:          0,
 		Hardware:         resource.Resources,
@@ -112,9 +134,14 @@ func (c *notebookComponentImpl) CreateNotebook(ctx context.Context, req *types.C
 		ClusterID:        resource.ClusterID,
 		SecureLevel:      2,
 		Type:             types.NotebookType,
-		UserUUID:         user.UUID,
+		UserUUID:         billingUUID,
 		OrderDetailID:    req.OrderDetailID,
 		SKU:              strconv.FormatInt(resource.ID, 10),
+		OwnerNamespace:   req.OwnerNamespace,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: exclusiveResp.NodeAffinity,
+			Tolerations:  exclusiveResp.Tolerations,
+		},
 	}
 
 	deployID, err := c.deployer.Deploy(ctx, dp)
@@ -136,7 +163,7 @@ func (c *notebookComponentImpl) GetNotebook(ctx context.Context, req *types.GetN
 	if err != nil {
 		return nil, err
 	}
-	reqReplica := types.DeployRepo{
+	reqReplica := types.DeployRequest{
 		DeployID:  deploy.ID,
 		SvcName:   deploy.SvcName,
 		ClusterID: deploy.ClusterID,
@@ -198,9 +225,10 @@ func (c *notebookComponentImpl) LogsNotebook(ctx context.Context, req *types.Sta
 	if err != nil {
 		return nil, fmt.Errorf("cannot find notebook for status check, %w", err)
 	}
-	return c.deployer.InstanceLogs(ctx, types.DeployRepo{
+	return c.deployer.InstanceLogs(ctx, types.DeployRequest{
 		DeployID:     deploy.ID,
 		InstanceName: req.InstanceName,
+		Since:        req.Since,
 	})
 }
 
@@ -215,7 +243,7 @@ func (c *notebookComponentImpl) DeleteNotebook(ctx context.Context, req *types.D
 		return err
 	}
 	// delete service
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		SpaceID:   0,
 		DeployID:  deploy.ID,
 		SvcName:   deploy.SvcName,
@@ -244,7 +272,7 @@ func (c *notebookComponentImpl) UpdateNotebook(ctx context.Context, req *types.U
 		return fmt.Errorf("cannot find deploy for notebook, %w", err)
 	}
 
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  deploy.ID,
 		SvcName:   deploy.SvcName,
 		ClusterID: deploy.ClusterID,
@@ -264,7 +292,11 @@ func (c *notebookComponentImpl) UpdateNotebook(ctx context.Context, req *types.U
 		return fmt.Errorf("cannot find resource, %w", err)
 	}
 
-	err = c.repoComponent.CheckAccountAndResource(ctx, req.CurrentUser, resource.ClusterID, deploy.OrderDetailID, resource)
+	notebookBillingNs := deploy.OwnerNamespace
+	if notebookBillingNs == "" {
+		notebookBillingNs = req.CurrentUser
+	}
+	exclusiveResp, err := c.repoComponent.CheckAccountAndResource(ctx, notebookBillingNs, resource.ClusterID, deploy.OrderDetailID, resource)
 	if err != nil {
 		return fmt.Errorf("resource is not available, %w", err)
 	}
@@ -282,6 +314,11 @@ func (c *notebookComponentImpl) UpdateNotebook(ctx context.Context, req *types.U
 
 	dur := &types.DeployUpdateReq{
 		ResourceID: &req.ResourceID,
+		ClusterID:  &resource.ClusterID,
+		DeployExtend: types.DeployExtend{
+			NodeAffinity: exclusiveResp.NodeAffinity,
+			Tolerations:  exclusiveResp.Tolerations,
+		},
 	}
 
 	err = c.deployer.UpdateDeploy(ctx, dur, deploy)
@@ -300,7 +337,7 @@ func (c *notebookComponentImpl) StartNotebook(ctx context.Context, req *types.St
 		return fmt.Errorf("cannot find deploy for notebook, %w", err)
 	}
 
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  deploy.ID,
 		SvcName:   deploy.SvcName,
 		ClusterID: deploy.ClusterID,
@@ -334,7 +371,7 @@ func (c *notebookComponentImpl) StopNotebook(ctx context.Context, req *types.Sto
 		return err
 	}
 
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  deploy.ID,
 		SvcName:   deploy.SvcName,
 		ClusterID: deploy.ClusterID,
@@ -367,10 +404,12 @@ func (c *notebookComponentImpl) Wakeup(ctx context.Context, deployId int64) erro
 	// get Deploy for inference
 	deploy, err := c.deployTaskStore.GetDeployByID(ctx, deployId)
 	if err != nil {
-		return fmt.Errorf("can't get notebook delopyment,%w", err)
+		return fmt.Errorf("can't get notebook deployment,%w", err)
 	}
-	return c.deployer.Wakeup(ctx, types.DeployRepo{
-		DeployID: deployId,
-		SvcName:  deploy.SvcName,
+	return c.deployer.Wakeup(ctx, types.DeployRequest{
+		DeployID:  deployId,
+		SvcName:   deploy.SvcName,
+		Endpoint:  deploy.Endpoint,
+		ClusterID: deploy.ClusterID,
 	})
 }

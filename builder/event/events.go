@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nats-io/nats.go/jetstream"
 	bldmq "opencsg.com/csghub-server/builder/mq"
 	"opencsg.com/csghub-server/common/config"
-	"opencsg.com/csghub-server/mq"
 )
 
 var (
@@ -17,19 +15,12 @@ var (
 )
 
 type EventPublisher struct {
-	Connector    mq.MessageQueue
 	SyncInterval int //in minutes
 	MQ           bldmq.MessageQueue
-	Cfg          *config.Config
 }
 
 // NewNatsConnector initializes a new connection to the NATS server
 func InitEventPublisher(cfg *config.Config) error {
-	handler, err := mq.GetOrInit(cfg)
-	if err != nil {
-		return fmt.Errorf("error creating message queue handler: %w", err)
-	}
-
 	mqFactory, err := bldmq.GetOrInitMessageQueueFactory(cfg)
 	if err != nil {
 		return fmt.Errorf("error creating message queue factory: %w", err)
@@ -40,17 +31,16 @@ func InitEventPublisher(cfg *config.Config) error {
 	}
 
 	DefaultEventPublisher = EventPublisher{
-		Connector:    handler,
 		SyncInterval: cfg.Event.SyncInterval,
 		MQ:           mq,
-		Cfg:          cfg,
 	}
 	return nil
 }
 
-func (ec *EventPublisher) CreateOrderExpiredConsumer() (jetstream.Consumer, error) {
-	return ec.Connector.BuildOrderConsumerWithName(CSGHubOrderExpiredConsumerName)
-}
+// Todo: update order code logic later
+// func (ec *EventPublisher) CreateOrderExpiredConsumer() (jetstream.Consumer, error) {
+// 	return ec.Connector.BuildOrderConsumerWithName(CSGHubOrderExpiredConsumerName)
+// }
 
 // Publish a message to the specified subject
 func (ec *EventPublisher) PublishMeteringEvent(message []byte) error {
@@ -72,13 +62,8 @@ func (ec *EventPublisher) PublishMeteringEvent(message []byte) error {
 
 func (ec *EventPublisher) PublishRechargeEvent(message []byte) error {
 	var err error
-	for i := 0; i < 3; i++ {
-		err = ec.Connector.VerifyRechargeStream()
-		if err != nil {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		err = ec.Connector.PublishRechargeDurationData(message)
+	for range 3 {
+		err = ec.MQ.Publish(bldmq.RechargeSucceedSubject, message)
 		if err == nil {
 			break
 		}
@@ -86,7 +71,24 @@ func (ec *EventPublisher) PublishRechargeEvent(message []byte) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to publish recharge event for 3 retries, %w", err)
+		return fmt.Errorf("failed to publish payment recharge event for 3 retries, %w", err)
+	}
+
+	return nil
+}
+
+func (ec *EventPublisher) PublishLLMLogTrainingEvent(message []byte) error {
+	var err error
+	for range 3 {
+		err = ec.MQ.Publish(bldmq.LLMLogSubject, message)
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to publish llmlog training event for 3 retries, %w", err)
 	}
 
 	return nil

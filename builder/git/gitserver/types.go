@@ -170,7 +170,9 @@ type GetRepoInfoByPathReq struct {
 	RepoType  types.RepositoryType `json:"repo_type"`
 	File      bool                 `json:"file"`
 	// limit file size, don't return file content if file size is greater than MaxFileSize
-	MaxFileSize int64 `json:"max_file_size"`
+	MaxFileSize                           int64    `json:"max_file_size"`
+	GitObjectDirectoryRelative            string   `json:"git_object_directory_relative"`
+	GitAlternateObjectDirectoriesRelative []string `json:"git_alternate_object_directories_relative"`
 }
 
 type GetRepoAllFilesReq struct {
@@ -299,4 +301,25 @@ type CopyRepositoryReq struct {
 type ReplicateRepositoryReq struct {
 	FromRelativePath string `json:"from_relative_path"`
 	ToRelativePath   string `json:"to_relative_path"`
+}
+
+type GetFilesByRevisionAndPathsReq struct {
+	Namespace string               `json:"namespace"`
+	Name      string               `json:"name"`
+	RepoType  types.RepositoryType `json:"repo_type"`
+	Revision  string               `json:"revision"`
+	Paths     []string             `json:"paths"`
+}
+
+type CreateForkReq struct {
+	// Source repository information
+	SourceRepoType    types.RepositoryType `json:"source_repo_type"`
+	SourceNamespace   string               `json:"source_namespace"`
+	SourceName        string               `json:"source_name"`
+	// Target repository information
+	TargetRepoType    types.RepositoryType `json:"target_repo_type"`
+	TargetNamespace   string               `json:"target_namespace"`
+	TargetName        string               `json:"target_name"`
+	// Revision to fork from (optional)
+	Revision          string               `json:"revision"`
 }

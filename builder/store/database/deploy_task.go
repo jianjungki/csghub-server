@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/uptrace/bun"
 	"opencsg.com/csghub-server/builder/deploy/common"
@@ -50,17 +53,22 @@ type Deploy struct {
 	// 1-public, 2-private, 3-extension in future
 	SecureLevel int `json:"secure_level"`
 	// 0-space, 1-inference, 2-finetune, 3-serverless, 4-evaluation, 5-notebook
-	Type          int                `json:"type"`
-	Task          types.PipelineTask `bun:",nullzero" json:"task"` //text-generation,text-to-image,text-to-speech
-	UserUUID      string             `bun:"," json:"user_uuid"`
-	SKU           string             `bun:"," json:"sku"`
-	OrderDetailID int64              `bun:"," json:"order_detail_id"`
-	EngineArgs    string             `bun:"," json:"engine_args"`
-	Variables     string             `bun:",nullzero" json:"variables"`
-	Message       string             `bun:",nullzero" json:"message"`
-	Reason        string             `bun:",nullzero" json:"reason"`
-	ClusterNode   string             `bun:"," json:"cluster_node"`
-	QueueName     string             `bun:"," json:"queue_name"`
+	Type           int                  `json:"type"`
+	Task           types.PipelineTask   `bun:",nullzero" json:"task"` //text-generation,text-to-image,text-to-speech
+	UserUUID       string               `bun:"," json:"user_uuid"`
+	SKU            string               `bun:"," json:"sku"`
+	OrderDetailID  int64                `bun:"," json:"order_detail_id"`
+	EngineArgs     string               `bun:"," json:"engine_args"`
+	Variables      string               `bun:",nullzero" json:"variables"`
+	Message        string               `bun:",nullzero" json:"message"`
+	Reason         string               `bun:",nullzero" json:"reason"`
+	ClusterNode    string               `bun:"," json:"cluster_node"`
+	QueueName      string               `bun:"," json:"queue_name"`
+	OwnerNamespace string               `bun:"," json:"owner_namespace"`
+	Instances      []types.Instance     `bun:"type:jsonb" json:"instances"`
+	NodeAffinity   *corev1.NodeAffinity `json:"node_affinity,omitempty"`
+	Tolerations    []types.Toleration   `json:"tolerations,omitempty"`
+	Timeout        int                  `json:"timeout,omitempty"`
 	times
 }
 
@@ -99,19 +107,24 @@ type DeployTaskStore interface {
 	DeleteDeployNow(ctx context.Context, deployID int64) error
 	DeleteDeployByID(ctx context.Context, userID int64, deployID int64) error
 	ListDeployByUserID(ctx context.Context, userID int64, req *types.DeployReq) ([]Deploy, int, error)
+	ListDeployByOwnerNamespace(ctx context.Context, ownerNamespace string, req *types.DeployReq) ([]Deploy, int, error)
 	ListInstancesByUserID(ctx context.Context, userID int64, per, page int) ([]Deploy, int, error)
+	ListFinetunesByOwnerNamespace(ctx context.Context, ownerNamespace string, per, page int) ([]Deploy, int, error)
 	GetDeployByID(ctx context.Context, deployID int64) (*Deploy, error)
 	GetDeployBySvcName(ctx context.Context, svcName string) (*Deploy, error)
 	StopDeploy(ctx context.Context, repoType types.RepositoryType, repoID, userID int64, deployID int64) error
 	StopDeployByID(ctx context.Context, userID int64, deployID int64) error
 	GetServerlessDeployByRepID(ctx context.Context, repoID int64) (*Deploy, error)
 	ListServerless(ctx context.Context, req types.DeployReq) ([]Deploy, int, error)
-	GetRunningDeployByUserID(ctx context.Context, userID int64) ([]Deploy, error)
+	GetRunningDeployByUserUUID(ctx context.Context, userUUID string) ([]Deploy, error)
 	ListAllDeployByUID(ctx context.Context, userID int64) ([]Deploy, error)
 	ListAllDeploys(ctx context.Context, req types.DeployReq, isActive bool) ([]Deploy, int, error)
 	RunningVisibleToUser(ctx context.Context, userID int64) ([]Deploy, error)
 	ListAllRunningDeploys(ctx context.Context) ([]Deploy, error)
 	GetLastTaskByType(ctx context.Context, deployID int64, taskType int) (*DeployTask, error)
+	GetClusterDeploys(ctx context.Context, req types.ClusterDeployReq) ([]Deploy, int, error)
+	ListDeploysByTimeRange(ctx context.Context, req types.DeployTimeRangeReq) ([]Deploy, int, error)
+	FindByDeployNameAndType(ctx context.Context, uuid, deployName string, deployType int) (*Deploy, error)
 }
 
 func NewDeployTaskStore() DeployTaskStore {
@@ -333,9 +346,53 @@ func (s *deployTaskStoreImpl) ListDeployByUserID(ctx context.Context, userID int
 	return result, total, nil
 }
 
+func (s *deployTaskStoreImpl) ListDeployByOwnerNamespace(ctx context.Context, ownerNamespace string, req *types.DeployReq) ([]Deploy, int, error) {
+	var result []Deploy
+	query := s.db.Operator.Core.NewSelect().Model(&result).Where("owner_namespace = ? and type = ?", ownerNamespace, req.DeployType)
+	query = query.Where("status != ?", common.Deleted)
+	if req.RepoType == types.ModelRepo {
+		query = query.Where("model_id > 0")
+	}
+	query = query.Order("id desc")
+	if req.RepoType == types.SpaceRepo {
+		query = query.Where("space_id > 0")
+	}
+	query = query.Limit(req.PageSize).Offset((req.Page - 1) * req.PageSize)
+	_, err := query.Exec(ctx, &result)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+	total, err := query.Count(ctx)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+	return result, total, nil
+}
+
 func (s *deployTaskStoreImpl) ListInstancesByUserID(ctx context.Context, userID int64, per, page int) ([]Deploy, int, error) {
 	var result []Deploy
 	query := s.db.Operator.Core.NewSelect().Model(&result).Where("user_id = ?", userID)
+	query = query.Where("type = ? and status != ?", types.FinetuneType, common.Deleted)
+	query = query.Order("id desc")
+	query = query.Limit(per).Offset((page - 1) * per)
+	_, err := query.Exec(ctx, &result)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+	total, err := query.Count(ctx)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+	return result, total, nil
+}
+
+func (s *deployTaskStoreImpl) ListFinetunesByOwnerNamespace(ctx context.Context, ownerNamespace string, per, page int) ([]Deploy, int, error) {
+	var result []Deploy
+	query := s.db.Operator.Core.NewSelect().Model(&result).Where("owner_namespace = ?", ownerNamespace)
 	query = query.Where("type = ? and status != ?", types.FinetuneType, common.Deleted)
 	query = query.Order("id desc")
 	query = query.Limit(per).Offset((page - 1) * per)
@@ -398,13 +455,21 @@ func (s *deployTaskStoreImpl) ListServerless(ctx context.Context, req types.Depl
 	var result []Deploy
 	query := s.db.Operator.Core.NewSelect().Model(&result).Where("type = ?", req.DeployType)
 	query = query.Where("status != ?", common.Deleted)
-	query = query.Limit(req.PageSize).Offset((req.Page - 1) * req.PageSize)
-	_, err := query.Exec(ctx, &result)
+
+	searchQuery := strings.TrimSpace(req.Query)
+	if searchQuery != "" {
+		searchPattern := "%" + strings.ToLower(searchQuery) + "%"
+		query = query.Where("LOWER(deploy_name) LIKE ? OR LOWER(git_path) LIKE ?", searchPattern, searchPattern)
+	}
+
+	total, err := query.Count(ctx)
 	if err != nil {
 		err = errorx.HandleDBError(err, nil)
 		return nil, 0, err
 	}
-	total, err := query.Count(ctx)
+
+	query = query.Limit(req.PageSize).Offset((req.Page - 1) * req.PageSize)
+	_, err = query.Exec(ctx, &result)
 	if err != nil {
 		err = errorx.HandleDBError(err, nil)
 		return nil, 0, err
@@ -478,11 +543,11 @@ func (s *deployTaskStoreImpl) GetDeploys(ctx context.Context, filter DeployFilte
 	return result, nil
 }
 
-func (s *deployTaskStoreImpl) GetRunningDeployByUserID(ctx context.Context, userID int64) ([]Deploy, error) {
+func (s *deployTaskStoreImpl) GetRunningDeployByUserUUID(ctx context.Context, userUUID string) ([]Deploy, error) {
 	// get all running inference and finetune of user
 	var result []Deploy
 	_, err := s.db.Operator.Core.NewSelect().Model(&result).
-		Where("user_id = ?", userID).
+		Where("user_uuid = ?", userUUID).
 		Where("type in (?)", bun.In([]int{types.SpaceType, types.InferenceType, types.FinetuneType, types.EvaluationType})).
 		Where("status not in (?)", bun.In([]int{common.Stopped, common.Deleted})).
 		Exec(ctx, &result)
@@ -568,6 +633,96 @@ func (s *deployTaskStoreImpl) GetLastTaskByType(ctx context.Context, deployID in
 		Scan(ctx, &result)
 	err = errorx.HandleDBError(err, nil)
 	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (s *deployTaskStoreImpl) GetClusterDeploys(ctx context.Context, req types.ClusterDeployReq) ([]Deploy, int, error) {
+	var result []Deploy
+	query := s.db.Operator.Core.NewSelect().Model(&result).Relation("User")
+
+	if req.ClusterID != "" {
+		query = query.Where("cluster_id = ?", req.ClusterID)
+	}
+	if req.ClusterNode != "" {
+		query = query.Where(
+			"? = ANY(STRING_TO_ARRAY(COALESCE(cluster_node, ''), ','))",
+			req.ClusterNode,
+		)
+	}
+	if req.Status != 0 {
+		query = query.Where("status = ?", req.Status)
+	}
+	if req.ResourceName != "" {
+		query = query.Where("hardware = ?", req.ResourceName)
+	}
+	if req.Search != "" {
+		searchPattern := "%" + req.Search + "%"
+		query = query.Where("svc_name LIKE ? OR \"user\".\"username\" LIKE ?", searchPattern, searchPattern)
+	}
+
+	total, err := query.Count(ctx)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+
+	query = query.Order("id DESC").Limit(req.Per).Offset((req.Page - 1) * req.Per)
+	_, err = query.Exec(ctx, &result)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+
+	return result, total, nil
+}
+func (s *deployTaskStoreImpl) ListDeploysByTimeRange(ctx context.Context, req types.DeployTimeRangeReq) ([]Deploy, int, error) {
+	var result []Deploy
+	query := s.db.Operator.Core.NewSelect().Model(&result).Relation("User")
+
+	if req.StartTime != nil {
+		query = query.Where("deploy.created_at >= ?", req.StartTime)
+	}
+	if req.EndTime != nil {
+		query = query.Where("deploy.created_at <= ?", req.EndTime)
+	}
+
+	// Get total count
+	total, err := query.Count(ctx)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	if req.PageSize > 0 {
+		query = query.Limit(req.PageSize)
+	}
+	if req.Page > 0 {
+		query = query.Offset((req.Page - 1) * req.PageSize)
+	}
+
+	query = query.Order("deploy.created_at DESC")
+	_, err = query.Exec(ctx, &result)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		return nil, 0, err
+	}
+
+	return result, total, nil
+}
+
+func (s *deployTaskStoreImpl) FindByDeployNameAndType(ctx context.Context, uuid, deployName string, deployType int) (*Deploy, error) {
+	var result Deploy
+	err := s.db.Operator.Core.NewSelect().Model(&result).
+		Where("user_uuid = ? and deploy_name = ? and type = ?", uuid, deployName, deployType).
+		Scan(ctx, &result)
+	if err != nil {
+		err = errorx.HandleDBError(err, nil)
+		if errors.Is(err, errorx.ErrDatabaseNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &result, nil

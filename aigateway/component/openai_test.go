@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	mockbldmq "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/mq"
 	mockdb "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/builder/store/database"
-	mockmq "opencsg.com/csghub-server/_mocks/opencsg.com/csghub-server/mq"
 	"opencsg.com/csghub-server/aigateway/token"
 	"opencsg.com/csghub-server/aigateway/types"
 
@@ -21,7 +21,6 @@ import (
 	"opencsg.com/csghub-server/builder/store/database"
 
 	bldmq "opencsg.com/csghub-server/builder/mq"
-	"opencsg.com/csghub-server/common/config"
 	commontypes "opencsg.com/csghub-server/common/types"
 )
 
@@ -58,10 +57,10 @@ func TestGetSceneFromSvcType(t *testing.T) {
 
 func TestFilterAndPaginateModels(t *testing.T) {
 	models := []types.Model{
-		{BaseModel: types.BaseModel{ID: "gpt-4:svc1", Object: "model", OwnedBy: "u1", Public: true}},
-		{BaseModel: types.BaseModel{ID: "gpt-3.5:svc2", Object: "model", OwnedBy: "u1", Public: false}},
-		{BaseModel: types.BaseModel{ID: "claude:svc3", Object: "model", OwnedBy: "u2", Public: true}},
-		{BaseModel: types.BaseModel{ID: "gpt-4o:svc4", Object: "model", OwnedBy: "u3", Public: true}},
+		{BaseModel: types.BaseModel{ID: "gpt-4:svc1", Object: "model", OwnedBy: "u1"}},
+		{BaseModel: types.BaseModel{ID: "gpt-3.5:svc2", Object: "model", OwnedBy: "u1"}},
+		{BaseModel: types.BaseModel{ID: "claude:svc3", Object: "model", OwnedBy: "u2"}},
+		{BaseModel: types.BaseModel{ID: "gpt-4o:svc4", Object: "model", OwnedBy: "u3"}},
 	}
 
 	t.Run("no filters default pagination", func(t *testing.T) {
@@ -82,20 +81,6 @@ func TestFilterAndPaginateModels(t *testing.T) {
 		assert.Len(t, resp.Data, 3)
 	})
 
-	t.Run("public filter parses bool", func(t *testing.T) {
-		resp := filterAndPaginateModels(models, types.ListModelsReq{Public: "false"})
-		assert.Equal(t, 1, resp.TotalCount)
-		require.Len(t, resp.Data, 1)
-		assert.False(t, resp.Data[0].Public)
-		assert.Equal(t, "gpt-3.5:svc2", resp.Data[0].ID)
-	})
-
-	t.Run("invalid public filter is ignored", func(t *testing.T) {
-		resp := filterAndPaginateModels(models, types.ListModelsReq{Public: "notabool"})
-		assert.Equal(t, 4, resp.TotalCount)
-		assert.Len(t, resp.Data, 4)
-	})
-
 	t.Run("pagination per/page applied after filters", func(t *testing.T) {
 		resp := filterAndPaginateModels(models, types.ListModelsReq{ModelID: "gpt", Per: "2", Page: "2"})
 		// gpt matches 3 models; page=2 per=2 yields 1 item
@@ -103,6 +88,278 @@ func TestFilterAndPaginateModels(t *testing.T) {
 		assert.Len(t, resp.Data, 1)
 		assert.Equal(t, "gpt-4o:svc4", resp.Data[0].ID)
 		assert.False(t, resp.HasMore)
+	})
+
+	t.Run("source filter csghub", func(t *testing.T) {
+		modelsWithSource := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-model:svc1", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "external-model", Object: "model", OwnedBy: "openai"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+			{BaseModel: types.BaseModel{ID: "csghub-model:svc2", Object: "model", OwnedBy: "u2"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "org/model2"}},
+		}
+		resp := filterAndPaginateModels(modelsWithSource, types.ListModelsReq{Source: string(types.ModelSourceCSGHub)})
+		assert.Equal(t, 2, resp.TotalCount)
+		assert.Len(t, resp.Data, 2)
+		assert.Equal(t, "csghub-model:svc1", resp.Data[0].ID)
+		assert.Equal(t, "csghub-model:svc2", resp.Data[1].ID)
+	})
+
+	t.Run("source filter external", func(t *testing.T) {
+		modelsWithSource := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-model:svc1", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "gpt-4", Object: "model", OwnedBy: "openai"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+			{BaseModel: types.BaseModel{ID: "claude", Object: "model", OwnedBy: "anthropic"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "anthropic"}},
+		}
+		resp := filterAndPaginateModels(modelsWithSource, types.ListModelsReq{Source: string(types.ModelSourceExternal)})
+		assert.Equal(t, 2, resp.TotalCount)
+		assert.Len(t, resp.Data, 2)
+		assert.Equal(t, "gpt-4", resp.Data[0].ID)
+		assert.Equal(t, "claude", resp.Data[1].ID)
+	})
+
+	t.Run("source filter is case-insensitive", func(t *testing.T) {
+		modelsWithSource := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-model:svc1", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "gpt-4", Object: "model", OwnedBy: "openai"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+		}
+		resp := filterAndPaginateModels(modelsWithSource, types.ListModelsReq{Source: "CSGHub"})
+		assert.Equal(t, 1, resp.TotalCount)
+		assert.Len(t, resp.Data, 1)
+		assert.Equal(t, "csghub-model:svc1", resp.Data[0].ID)
+	})
+
+	t.Run("unknown source filter includes all", func(t *testing.T) {
+		modelsWithSource := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-model:svc1", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "gpt-4", Object: "model", OwnedBy: "openai"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+		}
+		resp := filterAndPaginateModels(modelsWithSource, types.ListModelsReq{Source: "unknown"})
+		assert.Equal(t, 2, resp.TotalCount)
+		assert.Len(t, resp.Data, 2)
+	})
+
+	t.Run("source filter csghub includes public and private deployments", func(t *testing.T) {
+		modelsWithSource := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-public", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "csghub-private", Object: "model", OwnedBy: "u1"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model2"}},
+			{BaseModel: types.BaseModel{ID: "external-public", Object: "model", OwnedBy: "openai"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+		}
+		resp := filterAndPaginateModels(modelsWithSource, types.ListModelsReq{Source: string(types.ModelSourceCSGHub)})
+		assert.Equal(t, 2, resp.TotalCount)
+		assert.Len(t, resp.Data, 2)
+		assert.Equal(t, "csghub-public", resp.Data[0].ID)
+		assert.Equal(t, "csghub-private", resp.Data[1].ID)
+	})
+
+	t.Run("task filter text-generation", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "model-1", Object: "model", OwnedBy: "u1", Task: "text-generation"}},
+			{BaseModel: types.BaseModel{ID: "model-2", Object: "model", OwnedBy: "u1", Task: "text-to-image"}},
+			{BaseModel: types.BaseModel{ID: "model-3", Object: "model", OwnedBy: "u2", Task: "text-generation"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-generation"})
+		assert.Equal(t, 2, resp.TotalCount)
+		assert.Len(t, resp.Data, 2)
+		assert.Equal(t, "model-1", resp.Data[0].ID)
+		assert.Equal(t, "model-3", resp.Data[1].ID)
+	})
+
+	t.Run("task filter text-to-image", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "model-1", Object: "model", OwnedBy: "u1", Task: "text-generation"}},
+			{BaseModel: types.BaseModel{ID: "model-2", Object: "model", OwnedBy: "u1", Task: "text-to-image"}},
+			{BaseModel: types.BaseModel{ID: "model-3", Object: "model", OwnedBy: "u2", Task: "text-generation"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-to-image"})
+		assert.Equal(t, 1, resp.TotalCount)
+		assert.Len(t, resp.Data, 1)
+		assert.Equal(t, "model-2", resp.Data[0].ID)
+	})
+
+	t.Run("task filter is case-insensitive", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "model-1", Object: "model", OwnedBy: "u1", Task: "Text-Generation"}},
+			{BaseModel: types.BaseModel{ID: "model-2", Object: "model", OwnedBy: "u1", Task: "TEXT-TO-IMAGE"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-generation"})
+		assert.Equal(t, 1, resp.TotalCount)
+		assert.Len(t, resp.Data, 1)
+		assert.Equal(t, "model-1", resp.Data[0].ID)
+	})
+
+	t.Run("task filter with no matches", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "model-1", Object: "model", OwnedBy: "u1", Task: "text-generation"}},
+			{BaseModel: types.BaseModel{ID: "model-2", Object: "model", OwnedBy: "u1", Task: "text-to-image"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "non-existent-task"})
+		assert.Equal(t, 0, resp.TotalCount)
+		assert.Len(t, resp.Data, 0)
+	})
+
+	t.Run("task filter matches any comma-separated task on model", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "multi", Object: "model", OwnedBy: "u1", Task: "text-generation,text-to-image,summarization"}},
+			{BaseModel: types.BaseModel{ID: "single", Object: "model", OwnedBy: "u1", Task: "text-to-image"}},
+			{BaseModel: types.BaseModel{ID: "other", Object: "model", OwnedBy: "u1", Task: "embedding"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-generation"})
+		assert.Equal(t, 1, resp.TotalCount)
+		require.Len(t, resp.Data, 1)
+		assert.Equal(t, "multi", resp.Data[0].ID)
+
+		resp = filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "summarization"})
+		assert.Equal(t, 1, resp.TotalCount)
+		require.Len(t, resp.Data, 1)
+		assert.Equal(t, "multi", resp.Data[0].ID)
+	})
+
+	t.Run("task filter collapses repeated commas in model Task", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "sparse", Object: "model", OwnedBy: "u1", Task: "text-generation,,text-to-image"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-generation"})
+		assert.Equal(t, 1, resp.TotalCount)
+		resp = filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Task: "text-to-image"})
+		assert.Equal(t, 1, resp.TotalCount)
+	})
+
+	t.Run("task filter combined with source filter", func(t *testing.T) {
+		modelsWithTask := []types.Model{
+			{BaseModel: types.BaseModel{ID: "csghub-gen", Object: "model", OwnedBy: "u1", Task: "text-generation"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model1"}},
+			{BaseModel: types.BaseModel{ID: "csghub-image", Object: "model", OwnedBy: "u1", Task: "text-to-image"}, InternalModelInfo: types.InternalModelInfo{CSGHubModelID: "user/model2"}},
+			{BaseModel: types.BaseModel{ID: "external-gen", Object: "model", OwnedBy: "openai", Task: "text-generation"}, ExternalModelInfo: types.ExternalModelInfo{Provider: "openai"}},
+		}
+		resp := filterAndPaginateModels(modelsWithTask, types.ListModelsReq{Source: string(types.ModelSourceCSGHub), Task: "text-generation"})
+		assert.Equal(t, 1, resp.TotalCount)
+		assert.Len(t, resp.Data, 1)
+		assert.Equal(t, "csghub-gen", resp.Data[0].ID)
+	})
+}
+
+func TestOpenAIComponentImpl_getCSGHubModels_SkipsDeploysWithMissingRelations(t *testing.T) {
+	mockDeployStore := mockdb.NewMockDeployTaskStore(t)
+	comp := &openaiComponentImpl{
+		deployStore: mockDeployStore,
+		modelIDFmt:  "%s(%s)",
+	}
+
+	now := time.Now()
+	deploys := []database.Deploy{
+		{
+			ID:      1,
+			SvcName: "missing-repo",
+			Type:    commontypes.InferenceType,
+			User: &database.User{
+				Username: "owner",
+				UUID:     "owner-uuid",
+			},
+		},
+		{
+			ID:      2,
+			SvcName: "missing-user",
+			Type:    commontypes.InferenceType,
+			UserID:  2,
+			Repository: &database.Repository{
+				Name: "model-without-user",
+				Path: "namespace/model-without-user",
+			},
+		},
+		{
+			ID:      3,
+			SvcName: "valid-svc",
+			Type:    commontypes.InferenceType,
+			Repository: &database.Repository{
+				Name: "valid-model",
+				Path: "namespace/valid-model",
+			},
+			User: &database.User{
+				Username: "valid-owner",
+				UUID:     "valid-owner-uuid",
+			},
+			Endpoint: "valid-endpoint",
+		},
+	}
+	for i := range deploys {
+		deploys[i].CreatedAt = now
+	}
+
+	mockDeployStore.EXPECT().RunningVisibleToUser(mock.Anything, int64(1)).
+		Return(deploys, nil).Once()
+
+	models, err := comp.getCSGHubModels(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	assert.Equal(t, "namespace/valid-model:valid-svc", models[0].ID)
+	assert.Equal(t, "valid-owner", models[0].OwnedBy)
+	assert.Equal(t, "valid-owner-uuid", models[0].OwnerUUID)
+	assert.Equal(t, "valid-endpoint", models[0].Endpoint)
+}
+
+func TestOpenAIComponentImpl_applyFormatModelIDToModelList(t *testing.T) {
+	comp := &openaiComponentImpl{}
+
+	t.Run("nil model list", func(t *testing.T) {
+		comp.applyFormatModelIDToModelList(nil)
+	})
+
+	t.Run("empty model list should keep first and last nil", func(t *testing.T) {
+		modelList := types.ModelList{
+			Object:     "list",
+			Data:       []types.Model{},
+			FirstID:    nil,
+			LastID:     nil,
+			HasMore:    false,
+			TotalCount: 0,
+		}
+
+		comp.applyFormatModelIDToModelList(&modelList)
+
+		assert.Nil(t, modelList.FirstID)
+		assert.Nil(t, modelList.LastID)
+		assert.Len(t, modelList.Data, 0)
+	})
+
+	t.Run("should override id with format model id and recalculate first and last", func(t *testing.T) {
+		modelList := types.ModelList{
+			Object: "list",
+			Data: []types.Model{
+				{
+					BaseModel: types.BaseModel{
+						ID: "gpt-4o",
+					},
+					ExternalModelInfo: types.ExternalModelInfo{
+						FormatModelID: "gpt-4o(openai)",
+					},
+				},
+				{
+					BaseModel: types.BaseModel{
+						ID: "llama3",
+					},
+				},
+				{
+					BaseModel: types.BaseModel{
+						ID: "claude-3",
+					},
+					ExternalModelInfo: types.ExternalModelInfo{
+						FormatModelID: "claude-3(anthropic)",
+					},
+				},
+			},
+			HasMore:    false,
+			TotalCount: 3,
+		}
+
+		comp.applyFormatModelIDToModelList(&modelList)
+
+		require.Len(t, modelList.Data, 3)
+		assert.Equal(t, "gpt-4o(openai)", modelList.Data[0].ID)
+		assert.Equal(t, "llama3", modelList.Data[1].ID)
+		assert.Equal(t, "claude-3(anthropic)", modelList.Data[2].ID)
+
+		require.NotNil(t, modelList.FirstID)
+		require.NotNil(t, modelList.LastID)
+		assert.Equal(t, "gpt-4o(openai)", *modelList.FirstID)
+		assert.Equal(t, "claude-3(anthropic)", *modelList.LastID)
 	})
 }
 
@@ -329,9 +586,6 @@ func TestOpenAIComponent_checkOrganization(t *testing.T) {
 }
 
 func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
-	cfg, err := config.LoadConfig()
-	require.Nil(t, err)
-
 	mockUserStore := &mockdb.MockUserStore{}
 	mockDeployStore := &mockdb.MockDeployTaskStore{}
 	mockOrgStore := &mockdb.MockOrgStore{}
@@ -351,6 +605,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			name:     "successful record - dedicated inference by other user but not same organ",
 			userUUID: "test-user-uuid",
 			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeInference,
+					},
+				},
 				InternalModelInfo: types.InternalModelInfo{
 					CSGHubModelID: "test-model",
 					SvcName:       "test-service",
@@ -365,15 +624,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			},
 			wantError: false,
 			setupMock: func() {
-
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 
@@ -403,10 +658,10 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 					var evt commontypes.MeteringEvent
 					err := json.Unmarshal(data, &evt)
 					require.NoError(t, err)
-					require.Equal(t, "test-model", evt.ResourceID)
-					require.Equal(t, "test-model", evt.ResourceName)
+					require.Equal(t, "csghub://inference/test-model", evt.ResourceID)
+					require.Equal(t, "csghub://inference/test-model", evt.ResourceName)
 					require.Equal(t, "test-service", evt.CustomerID)
-					require.Equal(t, int(commontypes.SceneModelServerless), evt.Scene)
+					require.Equal(t, int(commontypes.SceneModelInference), evt.Scene)
 					require.Equal(t, "test-user-uuid", evt.UserUUID)
 					require.Equal(t, commontypes.TokenNumberType, evt.ValueType)
 					require.Equal(t, int64(150), evt.Value)
@@ -426,6 +681,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			name:     "successful record - dedicated inference deployed by same user",
 			userUUID: "test-user-uuid",
 			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeInference,
+					},
+				},
 				InternalModelInfo: types.InternalModelInfo{
 					CSGHubModelID: "test-model",
 					SvcName:       "test-service",
@@ -441,14 +701,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			wantError: false,
 			setupMock: func() {
 
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 
@@ -467,10 +724,10 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 					var evt commontypes.MeteringEvent
 					err := json.Unmarshal(data, &evt)
 					require.NoError(t, err)
-					require.Equal(t, "test-model", evt.ResourceID)
-					require.Equal(t, "test-model", evt.ResourceName)
+					require.Equal(t, "csghub://inference/test-model", evt.ResourceID)
+					require.Equal(t, "csghub://inference/test-model", evt.ResourceName)
 					require.Equal(t, "test-service", evt.CustomerID)
-					require.Equal(t, int(commontypes.SceneModelServerless), evt.Scene)
+					require.Equal(t, int(commontypes.SceneModelInference), evt.Scene)
 					require.Equal(t, "test-user-uuid", evt.UserUUID)
 					require.Equal(t, commontypes.TokenNumberType, evt.ValueType)
 					require.Equal(t, int64(150), evt.Value)
@@ -490,6 +747,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			name:     "successful record - serverless inference",
 			userUUID: "test-user-uuid",
 			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeServerless,
+					},
+				},
 				InternalModelInfo: types.InternalModelInfo{
 					CSGHubModelID: "test-model",
 					SvcName:       "test-service",
@@ -503,14 +765,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			},
 			wantError: false,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 
@@ -529,8 +788,8 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 					var evt commontypes.MeteringEvent
 					err := json.Unmarshal(data, &evt)
 					require.NoError(t, err)
-					require.Equal(t, "test-model", evt.ResourceID)
-					require.Equal(t, "test-model", evt.ResourceName)
+					require.Equal(t, "csghub://serverless/test-model", evt.ResourceID)
+					require.Equal(t, "csghub://serverless/test-model", evt.ResourceName)
 					require.Equal(t, "test-service", evt.CustomerID)
 					require.Equal(t, int(commontypes.SceneModelServerless), evt.Scene)
 					require.Equal(t, "test-user-uuid", evt.UserUUID)
@@ -550,9 +809,114 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			},
 		},
 		{
+			name:      "nil model",
+			userUUID:  "test-user-uuid",
+			model:     nil,
+			wantError: true,
+			setupMock: func() {
+				mockCounter = mocktoken.NewMockCounter(t)
+				comp = &openaiComponentImpl{
+					userStore:   mockUserStore,
+					deployStore: mockDeployStore,
+					eventPub: &event.EventPublisher{
+						SyncInterval: 1,
+						MQ:           mockbldmq.NewMockMessageQueue(t),
+					},
+				}
+				mockCounter.EXPECT().Usage(mock.Anything).Return(&token.Usage{
+					PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2,
+				}, nil)
+			},
+		},
+		{
+			name:     "conflicting csghub id and external provider",
+			userUUID: "test-user-uuid",
+			model: &types.Model{
+				InternalModelInfo: types.InternalModelInfo{
+					CSGHubModelID: "m",
+				},
+				ExternalModelInfo: types.ExternalModelInfo{
+					Provider: "openai",
+				},
+			},
+			wantError: true,
+			setupMock: func() {
+				mockCounter = mocktoken.NewMockCounter(t)
+				comp = &openaiComponentImpl{
+					userStore:   mockUserStore,
+					deployStore: mockDeployStore,
+					eventPub: &event.EventPublisher{
+						SyncInterval: 1,
+						MQ:           mockbldmq.NewMockMessageQueue(t),
+					},
+				}
+				mockCounter.EXPECT().Usage(mock.Anything).Return(&token.Usage{
+					PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2,
+				}, nil)
+			},
+		},
+		{
+			name:     "missing csghub id and provider",
+			userUUID: "test-user-uuid",
+			model: &types.Model{
+				BaseModel: types.BaseModel{ID: "orphan"},
+			},
+			wantError: true,
+			setupMock: func() {
+				mockCounter = mocktoken.NewMockCounter(t)
+				comp = &openaiComponentImpl{
+					userStore:   mockUserStore,
+					deployStore: mockDeployStore,
+					eventPub: &event.EventPublisher{
+						SyncInterval: 1,
+						MQ:           mockbldmq.NewMockMessageQueue(t),
+					},
+				}
+				mockCounter.EXPECT().Usage(mock.Anything).Return(&token.Usage{
+					PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2,
+				}, nil)
+			},
+		},
+		{
+			name:     "csghub model with invalid service type",
+			userUUID: "test-user-uuid",
+			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeInference,
+					},
+				},
+				InternalModelInfo: types.InternalModelInfo{
+					CSGHubModelID: "test-model",
+					SvcName:       "test-service",
+					SvcType:       2,
+				},
+			},
+			wantError: true,
+			setupMock: func() {
+				mockCounter = mocktoken.NewMockCounter(t)
+				comp = &openaiComponentImpl{
+					userStore:   mockUserStore,
+					deployStore: mockDeployStore,
+					eventPub: &event.EventPublisher{
+						SyncInterval: 1,
+						MQ:           mockbldmq.NewMockMessageQueue(t),
+					},
+				}
+				mockCounter.EXPECT().Usage(mock.Anything).Return(&token.Usage{
+					PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2,
+				}, nil)
+			},
+		},
+		{
 			name:     "counter error",
 			userUUID: "test-user-uuid",
 			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeInference,
+					},
+				},
 				InternalModelInfo: types.InternalModelInfo{
 					CSGHubModelID: "test-model",
 					SvcName:       "test-service",
@@ -561,10 +925,8 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			},
 			wantError: true,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
 				}
@@ -582,6 +944,11 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			name:     "publish error",
 			userUUID: "test-user-uuid",
 			model: &types.Model{
+				BaseModel: types.BaseModel{
+					Metadata: map[string]any{
+						types.MetaKeyLLMType: types.ProviderTypeInference,
+					},
+				},
 				InternalModelInfo: types.InternalModelInfo{
 					CSGHubModelID: "test-model",
 					SvcName:       "test-service",
@@ -596,13 +963,10 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 			},
 			wantError: true,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 				comp = &openaiComponentImpl{
@@ -635,9 +999,6 @@ func TestOpenAIComponentImpl_RecordUsage(t *testing.T) {
 }
 
 func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
-	cfg, err := config.LoadConfig()
-	require.Nil(t, err)
-
 	mockUserStore := &mockdb.MockUserStore{}
 	mockDeployStore := &mockdb.MockDeployTaskStore{}
 
@@ -656,7 +1017,7 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			userUUID: "test-user-uuid",
 			model: &types.Model{
 				BaseModel: types.BaseModel{
-					ID:      "gpt-4",
+					ID:      "gpt-4(openai)",
 					OwnedBy: "openai",
 				},
 				ExternalModelInfo: types.ExternalModelInfo{
@@ -665,14 +1026,11 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			},
 			wantError: false,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 
@@ -691,17 +1049,18 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 					var evt commontypes.MeteringEvent
 					err := json.Unmarshal(data, &evt)
 					require.NoError(t, err)
-					require.Equal(t, "gpt-4", evt.ResourceID)
-					require.Equal(t, "gpt-4", evt.ResourceName)
+					require.Equal(t, "openai://gpt-4(openai)", evt.ResourceID)
+					require.Equal(t, "openai://gpt-4(openai)", evt.ResourceName)
+					require.Equal(t, "gpt-4(openai)", evt.CustomerID)
 					require.Equal(t, "test-user-uuid", evt.UserUUID)
 					require.Equal(t, commontypes.TokenNumberType, evt.ValueType)
 					require.Equal(t, int64(300), evt.Value)
 					require.Equal(t, int(commontypes.SceneModelServerless), evt.Scene)
 
 					var tokenUsageExtra struct {
-						PromptTokenNum     string `json:"prompt_token_num"`
-						CompletionTokenNum string `json:"completion_token_num"`
-						OwnerType          commontypes.TokenUsageType
+						PromptTokenNum     string                     `json:"prompt_token_num"`
+						CompletionTokenNum string                     `json:"completion_token_num"`
+						OwnerType          commontypes.TokenUsageType `json:"owner_type"`
 					}
 					err = json.Unmarshal([]byte(evt.Extra), &tokenUsageExtra)
 					require.NoError(t, err)
@@ -726,10 +1085,8 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			},
 			wantError: true,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
 				}
@@ -757,13 +1114,10 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			},
 			wantError: true,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 				comp = &openaiComponentImpl{
@@ -784,7 +1138,7 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			userUUID: "test-user-uuid",
 			model: &types.Model{
 				BaseModel: types.BaseModel{
-					ID:      "test-model",
+					ID:      "test-model(test-provider)",
 					OwnedBy: "test-provider",
 				},
 				ExternalModelInfo: types.ExternalModelInfo{
@@ -793,14 +1147,11 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 			},
 			wantError: false,
 			setupMock: func() {
-				mockMQ := mockmq.NewMockMessageQueue(t)
 				mockBLDMQ := mockbldmq.NewMockMessageQueue(t)
 
 				eventPub := &event.EventPublisher{
-					Connector:    mockMQ,
 					SyncInterval: 1,
 					MQ:           mockBLDMQ,
-					Cfg:          cfg,
 				}
 				mockCounter = mocktoken.NewMockCounter(t)
 
@@ -819,14 +1170,15 @@ func TestOpenAIComponentImpl_RecordUsage_ExternalModel(t *testing.T) {
 					var evt commontypes.MeteringEvent
 					err := json.Unmarshal(data, &evt)
 					require.NoError(t, err)
-					require.Equal(t, "test-model", evt.ResourceID)
-					require.Equal(t, "test-model", evt.ResourceName)
+					require.Equal(t, "test-provider://test-model(test-provider)", evt.ResourceID)
+					require.Equal(t, "test-provider://test-model(test-provider)", evt.ResourceName)
+					require.Equal(t, "test-model(test-provider)", evt.CustomerID)
 					require.Equal(t, int64(0), evt.Value)
 
 					var tokenUsageExtra struct {
-						PromptTokenNum     string `json:"prompt_token_num"`
-						CompletionTokenNum string `json:"completion_token_num"`
-						OwnerType          commontypes.TokenUsageType
+						PromptTokenNum     string                     `json:"prompt_token_num"`
+						CompletionTokenNum string                     `json:"completion_token_num"`
+						OwnerType          commontypes.TokenUsageType `json:"owner_type"`
 					}
 					err = json.Unmarshal([]byte(evt.Extra), &tokenUsageExtra)
 					require.NoError(t, err)

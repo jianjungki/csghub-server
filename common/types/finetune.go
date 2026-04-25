@@ -1,6 +1,8 @@
 package types
 
-import "time"
+import (
+	"time"
+)
 
 var _ SensitiveRequestV2 = (*FinetuneReq)(nil)
 
@@ -25,6 +27,7 @@ func (c *FinetuneReq) GetSensitiveFields() []SensitiveField {
 
 type FinetuneReq struct {
 	Username         string   `json:"-"`
+	Namespace        string   `json:"namespace,omitempty"`
 	Token            string   `json:"-"`
 	Hardware         HardWare `json:"-"`
 	UserUUID         string   `json:"-"`
@@ -34,6 +37,8 @@ type FinetuneReq struct {
 	TaskType         TaskType `json:"-"`
 	DownloadEndpoint string   `json:"-"`
 	ResourceName     string   `json:"-"`
+	Revision         string   `json:"-"`
+	DatasetRevision  string   `json:"-"`
 
 	TaskName           string  `json:"task_name"`
 	TaskDesc           string  `json:"task_desc"`
@@ -47,6 +52,8 @@ type FinetuneReq struct {
 	CustomeArgs        string  `json:"custom_args"`
 	Agent              string  `json:"agent,omitempty"`
 	Nodes              []Node  `json:"-"`
+
+	DeployExtend
 }
 
 type FinetineGetReq struct {

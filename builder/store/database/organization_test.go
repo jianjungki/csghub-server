@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -222,4 +223,122 @@ func TestOrganizationStore_GetOrgByUserIDs(t *testing.T) {
 	orgs, err = store.GetSharedOrgIDs(ctx, []int64{})
 	require.Nil(t, err)
 	require.Empty(t, orgs)
+}
+
+func TestOrganizationStore_FindByUUID(t *testing.T) {
+	db := tests.InitTestDB()
+	defer db.Close()
+	ctx := context.TODO()
+
+	store := database.NewOrgStoreWithDB(db)
+
+	// Test case 1: Find an existing organization by UUID
+	testUUID := uuid.New()
+	err := store.Create(ctx, &database.Organization{
+		Name:     "test_org",
+		Nickname: "test_org_nickname",
+		UUID:     testUUID,
+	}, &database.Namespace{Path: "test_org"})
+	require.Nil(t, err)
+
+	// Find the organization by UUID
+	org, err := store.FindByUUID(ctx, testUUID.String())
+	require.Nil(t, err)
+	require.NotNil(t, org)
+	require.Equal(t, "test_org", org.Name)
+	require.Equal(t, testUUID, org.UUID)
+
+	// Test case 2: Find non-existent organization by UUID
+	nonExistentUUID := uuid.New()
+	org, err = store.FindByUUID(ctx, nonExistentUUID.String())
+	require.Nil(t, err)
+	require.Nil(t, org)
+
+	// Test case 3: Find organization with invalid UUID format
+	// Database returns error for invalid UUID format
+	org, err = store.FindByUUID(ctx, "invalid-uuid-format")
+	require.NotNil(t, err)
+	require.Nil(t, org)
+}
+
+func TestOrganizationStore_SearchOrder(t *testing.T) {
+	db := tests.InitTestDB()
+	defer db.Close()
+	ctx := context.TODO()
+
+	store := database.NewOrgStoreWithDB(db)
+	orgsToCreate := []database.Organization{
+		{
+			Name:     "sss",
+			Nickname: "zzz org",
+			UUID:     uuid.New(),
+		},
+		{
+			Name:     "sss-team",
+			Nickname: "alpha org",
+			UUID:     uuid.New(),
+		},
+		{
+			Name:     "team-01",
+			Nickname: "sss",
+			UUID:     uuid.New(),
+		},
+		{
+			Name:     "team-02",
+			Nickname: "sss group",
+			UUID:     uuid.New(),
+		},
+		{
+			Name:     "team-03",
+			Nickname: "group sss",
+			UUID:     uuid.New(),
+		},
+	}
+
+	for _, org := range orgsToCreate {
+		err := store.Create(ctx, &org, &database.Namespace{Path: org.Name})
+		require.Nil(t, err)
+	}
+
+	orgs, total, err := store.Search(ctx, "sss", 10, 1, "", "")
+	require.Nil(t, err)
+	require.Equal(t, 5, total)
+
+	gotNames := make([]string, 0, len(orgs))
+	for _, org := range orgs {
+		gotNames = append(gotNames, org.Name)
+	}
+
+	require.Equal(t, []string{"sss", "sss-team", "team-01", "team-02", "team-03"}, gotNames)
+}
+
+func TestOrganizationStore_SearchOrderCaseInsensitive(t *testing.T) {
+	db := tests.InitTestDB()
+	defer db.Close()
+	ctx := context.TODO()
+
+	store := database.NewOrgStoreWithDB(db)
+	err := store.Create(ctx, &database.Organization{
+		Name:     "SSS-Exact",
+		Nickname: "display",
+		UUID:     uuid.New(),
+	}, &database.Namespace{Path: "SSS-Exact"})
+	require.Nil(t, err)
+	err = store.Create(ctx, &database.Organization{
+		Name:     "other",
+		Nickname: "sss",
+		UUID:     uuid.New(),
+	}, &database.Namespace{Path: "other"})
+	require.Nil(t, err)
+
+	orgs, total, err := store.Search(ctx, "sss-exact", 10, 1, "", "")
+	require.Nil(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, orgs, 1)
+	require.Equal(t, "SSS-Exact", orgs[0].Name)
+
+	orgs, total, err = store.Search(ctx, "SSS", 10, 1, "", "")
+	require.Nil(t, err)
+	require.Equal(t, 2, total)
+	require.True(t, slices.Equal([]string{"SSS-Exact", "other"}, []string{orgs[0].Name, orgs[1].Name}))
 }

@@ -5,6 +5,7 @@ package component
 import (
 	"context"
 
+	"opencsg.com/csghub-server/builder/store/database"
 	"opencsg.com/csghub-server/common/types"
 )
 
@@ -16,7 +17,7 @@ func (ac *accountingComponentImpl) QueryBalanceByUserID(ctx context.Context, cur
 	return nil, nil
 }
 
-func (ac *accountingComponentImpl) QueryBalanceByUserIDInternal(ctx context.Context, currentUser string) (interface{}, error) {
+func (ac *accountingComponentImpl) QueryBalanceByUserIDInternal(ctx context.Context, currentUser string) (*database.AccountUser, error) {
 	return nil, nil
 }
 
@@ -25,6 +26,10 @@ func (ac *accountingComponentImpl) ListStatementByUserIDAndTime(ctx context.Cont
 }
 
 func (ac *accountingComponentImpl) ListBillsByUserIDAndDate(ctx context.Context, req types.ActStatementsReq) (interface{}, error) {
+	return nil, nil
+}
+
+func (ac *accountingComponentImpl) ListBillsDetailByUserID(ctx context.Context, req types.AcctBillsDetailReq) (interface{}, error) {
 	return nil, nil
 }
 
@@ -48,7 +53,11 @@ func (ac *accountingComponentImpl) GetQuotaStatement(currentUser string, req typ
 	return nil, nil
 }
 
-func (ac *accountingComponentImpl) QueryPricesBySKUType(currentUser string, req types.AcctPriceListReq) (interface{}, error) {
+func (ac *accountingComponentImpl) QueryPricesBySKUType(currentUser string, req types.AcctPriceListReq) (*database.PriceResp, error) {
+	return nil, nil
+}
+
+func (ac *accountingComponentImpl) QueryPricesBySkuTypeAndKinds(currentUser string, req types.AcctPriceListByKindsReq) (any, error) {
 	return nil, nil
 }
 
@@ -68,11 +77,11 @@ func (ac *accountingComponentImpl) DeletePrice(currentUser string, id int64) (in
 	return nil, nil
 }
 
-func (ac *accountingComponentImpl) CreateOrder(currentUser string, req types.AcctOrderCreateReq) (interface{}, error) {
+func (ac *accountingComponentImpl) CreateOrder(currentUser string, req types.AcctOrderCreateReq) (*database.AccountOrder, error) {
 	return nil, nil
 }
 
-func (ac *accountingComponentImpl) ListRechargeByUserIDAndTime(ctx context.Context, req types.AcctRechargeListReq) (interface{}, error) {
+func (ac *accountingComponentImpl) ListRecharge(ctx context.Context, req types.AcctRechargeListReq) (interface{}, error) {
 	return nil, nil
 }
 
@@ -81,6 +90,10 @@ func (ac *accountingComponentImpl) RechargesIndex(ctx context.Context, req types
 }
 
 func (ac *accountingComponentImpl) StatementsIndex(ctx context.Context, req types.ActStatementsReq) ([]types.AcctStatementsRes, int, error) {
+	return nil, 0, nil
+}
+
+func (ac *accountingComponentImpl) ListPresents(ctx context.Context, req types.PresentsIndexReq) ([]*types.PresentIndexResp, int, error) {
 	return nil, 0, nil
 }
 

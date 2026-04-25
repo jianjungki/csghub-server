@@ -228,6 +228,53 @@ func (_c *MockGitServer_CreateBranch_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// CreateFork provides a mock function with given fields: ctx, req
+func (_m *MockGitServer) CreateFork(ctx context.Context, req gitserver.CreateForkReq) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateFork")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.CreateForkReq) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockGitServer_CreateFork_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateFork'
+type MockGitServer_CreateFork_Call struct {
+	*mock.Call
+}
+
+// CreateFork is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req gitserver.CreateForkReq
+func (_e *MockGitServer_Expecter) CreateFork(ctx interface{}, req interface{}) *MockGitServer_CreateFork_Call {
+	return &MockGitServer_CreateFork_Call{Call: _e.mock.On("CreateFork", ctx, req)}
+}
+
+func (_c *MockGitServer_CreateFork_Call) Run(run func(ctx context.Context, req gitserver.CreateForkReq)) *MockGitServer_CreateFork_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(gitserver.CreateForkReq))
+	})
+	return _c
+}
+
+func (_c *MockGitServer_CreateFork_Call) Return(_a0 error) *MockGitServer_CreateFork_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockGitServer_CreateFork_Call) RunAndReturn(run func(context.Context, gitserver.CreateForkReq) error) *MockGitServer_CreateFork_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateMirrorRepo provides a mock function with given fields: ctx, req
 func (_m *MockGitServer) CreateMirrorRepo(ctx context.Context, req gitserver.CreateMirrorRepoReq) (int64, error) {
 	ret := _m.Called(ctx, req)
@@ -1109,6 +1156,65 @@ func (_c *MockGitServer_GetDiffBetweenTwoCommits_Call) Return(_a0 *types.GiteaCa
 }
 
 func (_c *MockGitServer_GetDiffBetweenTwoCommits_Call) RunAndReturn(run func(context.Context, gitserver.GetDiffBetweenTwoCommitsReq) (*types.GiteaCallbackPushReq, error)) *MockGitServer_GetDiffBetweenTwoCommits_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFilesByRevisionAndPaths provides a mock function with given fields: ctx, req
+func (_m *MockGitServer) GetFilesByRevisionAndPaths(ctx context.Context, req gitserver.GetFilesByRevisionAndPathsReq) ([]*types.File, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFilesByRevisionAndPaths")
+	}
+
+	var r0 []*types.File
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetFilesByRevisionAndPathsReq) ([]*types.File, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetFilesByRevisionAndPathsReq) []*types.File); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*types.File)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, gitserver.GetFilesByRevisionAndPathsReq) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitServer_GetFilesByRevisionAndPaths_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFilesByRevisionAndPaths'
+type MockGitServer_GetFilesByRevisionAndPaths_Call struct {
+	*mock.Call
+}
+
+// GetFilesByRevisionAndPaths is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req gitserver.GetFilesByRevisionAndPathsReq
+func (_e *MockGitServer_Expecter) GetFilesByRevisionAndPaths(ctx interface{}, req interface{}) *MockGitServer_GetFilesByRevisionAndPaths_Call {
+	return &MockGitServer_GetFilesByRevisionAndPaths_Call{Call: _e.mock.On("GetFilesByRevisionAndPaths", ctx, req)}
+}
+
+func (_c *MockGitServer_GetFilesByRevisionAndPaths_Call) Run(run func(ctx context.Context, req gitserver.GetFilesByRevisionAndPathsReq)) *MockGitServer_GetFilesByRevisionAndPaths_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(gitserver.GetFilesByRevisionAndPathsReq))
+	})
+	return _c
+}
+
+func (_c *MockGitServer_GetFilesByRevisionAndPaths_Call) Return(_a0 []*types.File, _a1 error) *MockGitServer_GetFilesByRevisionAndPaths_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitServer_GetFilesByRevisionAndPaths_Call) RunAndReturn(run func(context.Context, gitserver.GetFilesByRevisionAndPathsReq) ([]*types.File, error)) *MockGitServer_GetFilesByRevisionAndPaths_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2067,6 +2173,120 @@ func (_c *MockGitServer_GetRepoLfsPointers_Call) Return(_a0 []*types.LFSPointer,
 }
 
 func (_c *MockGitServer_GetRepoLfsPointers_Call) RunAndReturn(run func(context.Context, gitserver.GetRepoFilesReq) ([]*types.LFSPointer, error)) *MockGitServer_GetRepoLfsPointers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRepoLfsSize provides a mock function with given fields: ctx, req
+func (_m *MockGitServer) GetRepoLfsSize(ctx context.Context, req gitserver.GetRepoInfoByPathReq) (int64, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRepoLfsSize")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetRepoInfoByPathReq) (int64, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetRepoInfoByPathReq) int64); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, gitserver.GetRepoInfoByPathReq) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitServer_GetRepoLfsSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRepoLfsSize'
+type MockGitServer_GetRepoLfsSize_Call struct {
+	*mock.Call
+}
+
+// GetRepoLfsSize is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req gitserver.GetRepoInfoByPathReq
+func (_e *MockGitServer_Expecter) GetRepoLfsSize(ctx interface{}, req interface{}) *MockGitServer_GetRepoLfsSize_Call {
+	return &MockGitServer_GetRepoLfsSize_Call{Call: _e.mock.On("GetRepoLfsSize", ctx, req)}
+}
+
+func (_c *MockGitServer_GetRepoLfsSize_Call) Run(run func(ctx context.Context, req gitserver.GetRepoInfoByPathReq)) *MockGitServer_GetRepoLfsSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(gitserver.GetRepoInfoByPathReq))
+	})
+	return _c
+}
+
+func (_c *MockGitServer_GetRepoLfsSize_Call) Return(_a0 int64, _a1 error) *MockGitServer_GetRepoLfsSize_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitServer_GetRepoLfsSize_Call) RunAndReturn(run func(context.Context, gitserver.GetRepoInfoByPathReq) (int64, error)) *MockGitServer_GetRepoLfsSize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRepoSize provides a mock function with given fields: ctx, req
+func (_m *MockGitServer) GetRepoSize(ctx context.Context, req gitserver.GetRepoInfoByPathReq) (int64, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRepoSize")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetRepoInfoByPathReq) (int64, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, gitserver.GetRepoInfoByPathReq) int64); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, gitserver.GetRepoInfoByPathReq) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitServer_GetRepoSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRepoSize'
+type MockGitServer_GetRepoSize_Call struct {
+	*mock.Call
+}
+
+// GetRepoSize is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req gitserver.GetRepoInfoByPathReq
+func (_e *MockGitServer_Expecter) GetRepoSize(ctx interface{}, req interface{}) *MockGitServer_GetRepoSize_Call {
+	return &MockGitServer_GetRepoSize_Call{Call: _e.mock.On("GetRepoSize", ctx, req)}
+}
+
+func (_c *MockGitServer_GetRepoSize_Call) Run(run func(ctx context.Context, req gitserver.GetRepoInfoByPathReq)) *MockGitServer_GetRepoSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(gitserver.GetRepoInfoByPathReq))
+	})
+	return _c
+}
+
+func (_c *MockGitServer_GetRepoSize_Call) Return(_a0 int64, _a1 error) *MockGitServer_GetRepoSize_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitServer_GetRepoSize_Call) RunAndReturn(run func(context.Context, gitserver.GetRepoInfoByPathReq) (int64, error)) *MockGitServer_GetRepoSize_Call {
 	_c.Call.Return(run)
 	return _c
 }

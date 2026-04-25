@@ -40,6 +40,7 @@ type UserStore interface {
 	GetUserUUIDs(ctx context.Context, per, page int) ([]string, int, error)
 	UpdatePhone(ctx context.Context, userID int64, phone string, phoneArea string) error
 	IndexWithCursor(ctx context.Context, req types.UserIndexReq) (ch chan Wrapper, err error)
+	FindByID(ctx context.Context, userID int64) (User, error)
 }
 
 // Implement the UserStore interface in UserStoreImpl
@@ -177,7 +178,7 @@ func (s *UserStoreImpl) IndexWithSearch(ctx context.Context, req types.UserListR
 func (s *UserStoreImpl) FindByUsername(ctx context.Context, username string) (user User, err error) {
 	user.Username = username
 	err = s.db.Operator.Core.NewSelect().
-		Model(&user).
+		Model(&user).Relation("Namespaces").
 		Where("username = ?", username).
 		Scan(ctx)
 	return user, errorx.HandleDBError(err, map[string]interface{}{"username": username})
@@ -189,8 +190,8 @@ func (s *UserStoreImpl) FindByEmail(ctx context.Context, email string) (user Use
 	return user, errorx.HandleDBError(err, nil)
 }
 
-func (s *UserStoreImpl) FindByID(ctx context.Context, id int) (user User, err error) {
-	user.ID = int64(id)
+func (s *UserStoreImpl) FindByID(ctx context.Context, id int64) (user User, err error) {
+	user.ID = id
 	err = s.db.Operator.Core.NewSelect().Model(&user).WherePK().Scan(ctx)
 	err = errorx.HandleDBError(err, nil)
 	return
@@ -309,7 +310,7 @@ func (s *UserStoreImpl) FindByGitAccessToken(ctx context.Context, token string) 
 func (s *UserStoreImpl) FindByUUID(ctx context.Context, uuid string) (*User, error) {
 	var user User
 	err := s.db.Operator.Core.NewSelect().
-		Model(&user).
+		Model(&user).Relation("Namespaces").
 		Where("uuid = ?", uuid).
 		Scan(ctx)
 	if err != nil {
@@ -463,7 +464,7 @@ func (s *UserStoreImpl) FindByUUIDs(ctx context.Context, uuids []string) ([]*Use
 	}
 
 	err := s.db.Operator.Core.NewSelect().
-		Model(&users).
+		Model(&users).Relation("Namespaces").
 		Where("uuid IN (?)", bun.In(uuids)).
 		Scan(ctx)
 	if err != nil {

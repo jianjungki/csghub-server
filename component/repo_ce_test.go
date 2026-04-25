@@ -43,14 +43,14 @@ func TestRepoComponent_DeployUpdate(t *testing.T) {
 		Resources: `{ "gpu": { "type": "A10", "num": "1", "resource_name": "nvidia.com/gpu", "labels": { "aliyun.accelerator/nvidia_name": "NVIDIA-A10" } }, "cpu": { "type": "Intel", "num": "12" },  "memory": "46Gi" }`,
 	}, nil)
 
-	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, nil)
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, []types.ResourceAvailableStatus{}, nil)
 
 	repo.mocks.stores.RuntimeFrameworkMock().EXPECT().FindEnabledByName(ctx, "fm").Return(&database.RuntimeFramework{
 		ID: 999,
 	}, nil)
 	repo.mocks.stores.ClusterInfoMock().EXPECT().ByClusterID(ctx, "cluster").Return(database.ClusterInfo{}, nil)
 
-	repo.mocks.deployer.EXPECT().Exist(ctx, types.DeployRepo{
+	repo.mocks.deployer.EXPECT().Exist(ctx, types.DeployRequest{
 		DeployID:  1,
 		Namespace: "ns",
 		Name:      "n",
@@ -94,9 +94,9 @@ func TestRepoComponent_DeployStart(t *testing.T) {
 		Resources: `{ "gpu": { "type": "A10", "num": "1", "resource_name": "nvidia.com/gpu", "labels": { "aliyun.accelerator/nvidia_name": "NVIDIA-A10" } }, "cpu": { "type": "Intel", "num": "12" },  "memory": "46Gi" }`,
 	}, nil)
 
-	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, nil)
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, []types.ResourceAvailableStatus{}, nil)
 
-	repo.mocks.deployer.EXPECT().Exist(ctx, types.DeployRepo{
+	repo.mocks.deployer.EXPECT().Exist(ctx, types.DeployRequest{
 		DeployID:  1,
 		Namespace: "ns",
 		Name:      "n",
@@ -141,9 +141,9 @@ func TestRepoComponent_DeployStart_ExistAndRunning(t *testing.T) {
 		Resources: `{ "gpu": { "type": "A10", "num": "1", "resource_name": "nvidia.com/gpu", "labels": { "aliyun.accelerator/nvidia_name": "NVIDIA-A10" } }, "cpu": { "type": "Intel", "num": "12" },  "memory": "46Gi" }`,
 	}, nil)
 
-	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, nil)
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, []types.ResourceAvailableStatus{}, nil)
 
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  1,
 		Namespace: "ns",
 		Name:      "n",
@@ -191,9 +191,9 @@ func TestRepoComponent_DeployStart_ExistButNotRunning(t *testing.T) {
 		Resources: `{ "gpu": { "type": "A10", "num": "1", "resource_name": "nvidia.com/gpu", "labels": { "aliyun.accelerator/nvidia_name": "NVIDIA-A10" } }, "cpu": { "type": "Intel", "num": "12" },  "memory": "46Gi" }`,
 	}, nil)
 
-	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, nil)
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, []types.ResourceAvailableStatus{}, nil)
 
-	deployRepo := types.DeployRepo{
+	deployRepo := types.DeployRequest{
 		DeployID:  1,
 		Namespace: "ns",
 		Name:      "n",
@@ -634,4 +634,32 @@ func TestRepoComponent_MirrorFromSaas(t *testing.T) {
 			require.Nil(t, err)
 		})
 	}
+}
+
+func TestRepoComponent_CheckAccountAndResource(t *testing.T) {
+	ctx := context.TODO()
+	repo := initializeTestRepoComponent(ctx, t)
+
+	resource := &database.SpaceResource{
+		Resources: `{"gpu": {"num": "1", "type": "A10"}}`,
+	}
+
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(true, []types.ResourceAvailableStatus{}, nil).Once()
+
+	resp, err := repo.CheckAccountAndResource(ctx, "user", "cluster", 1, resource)
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+
+	// Test error case
+	repo.mocks.deployer.EXPECT().CheckResourceAvailable(ctx, "cluster", int64(0), mock.Anything).Return(false, []types.ResourceAvailableStatus{}, errors.New("error"))
+
+	resp, err = repo.CheckAccountAndResource(ctx, "user", "cluster", 1, resource)
+	require.NotNil(t, err)
+	require.Nil(t, resp)
+
+	// Test invalid hardware setting
+	resource.Resources = `invalid json`
+	resp, err = repo.CheckAccountAndResource(ctx, "user", "cluster", 1, resource)
+	require.NotNil(t, err)
+	require.Nil(t, resp)
 }

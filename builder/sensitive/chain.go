@@ -111,9 +111,9 @@ func (c *chainImpl) PassImageURLCheck(ctx context.Context, scenario types.Sensit
 	return &CheckResult{IsSensitive: false}, nil
 }
 
-func (c *chainImpl) PassLLMCheck(ctx context.Context, scenario types.SensitiveScenario, text string, sessionId string, accountId string) (*CheckResult, error) {
+func (c *chainImpl) PassLLMCheck(ctx context.Context, req *types.LLMCheckRequest) (*CheckResult, error) {
 	for _, checker := range c.checkers {
-		res, err := checker.PassLLMCheck(ctx, scenario, text, sessionId, accountId)
+		res, err := checker.PassLLMCheck(ctx, req)
 		if err != nil {
 			return nil, err
 		}

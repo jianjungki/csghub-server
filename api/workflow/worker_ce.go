@@ -5,6 +5,7 @@ package workflow
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
@@ -43,6 +44,9 @@ func StartWorkflow(cfg *config.Config, registerAsWorker bool) error {
 	client, err := temporal.NewClient(client.Options{
 		HostPort: cfg.WorkFLow.Endpoint,
 		Logger:   log.NewStructuredLogger(slog.Default()),
+		ConnectionOptions: client.ConnectionOptions{
+			GetSystemInfoTimeout: time.Duration(cfg.Temporal.GetSystemInfoTimeout) * time.Second,
+		},
 	}, "csghub-api")
 	if err != nil {
 		return fmt.Errorf("unable to create workflow client, error: %w", err)
@@ -85,7 +89,7 @@ func StartWorkflowDI(
 
 		worker.RegisterWorkflow(HandlePushWorkflow)
 		worker.RegisterWorkflow(RuntimeFrameworkWorkflow)
-
+		worker.RegisterWorkflow(CalculateRepoSizeWorkflow)
 		RegisterCronWorker(cfg, temporalClient, act)
 		err := RegisterCronJobs(cfg, temporalClient)
 		if err != nil {
